@@ -1,0 +1,24 @@
+2026-06-12 09:09:15
+[eagle3_sgl] target=NousResearch/Meta-Llama-3.1-8B-Instruct draft=yuhuili/EAGLE3-LLaMA3.1-Instruct-8B verify=full_model_tree(backend=auto) tree=cumulative ar_draft=True inc_acts=True inc_draft_ext=True eagle_layers=[2, 16, 29] topk=4 num_steps=4 max_nodes=24 dtype=bfloat16
+  new_tokens=26  rounds=10  accept/round=2.60
+  wall=1.65s  spec_tok/s=15.73  lossless=True
+  baseline(HF greedy) new_tokens=24  wall=0.38s  base_tok/s=62.49  speedup=0.25x
+
+2026-07-28 13:54:05
+[eagle3_sgl] target=NousResearch/Meta-Llama-3.1-8B-Instruct draft=yuhuili/EAGLE3-LLaMA3.1-Instruct-8B verify=full_model_tree(backend=auto) tree=cumulative ar_draft=True inc_acts=True inc_draft_ext=True eagle_layers=[2, 16, 29] topk=8 num_steps=8 max_nodes=64 dtype=float16
+  new_tokens=81  rounds=31  accept/round=2.61
+  wall=4.40s  spec_tok/s=18.40  lossless=False
+  baseline(HF greedy) new_tokens=80  wall=1.25s  base_tok/s=64.13  speedup=0.29x
+
+2026-07-28 14:04:50
+[eagle3_sgl] target=NousResearch/Meta-Llama-3.1-8B-Instruct draft=yuhuili/EAGLE3-LLaMA3.1-Instruct-8B verify=reference_paths(backend=auto) tree=cumulative ar_draft=True inc_acts=True inc_draft_ext=True eagle_layers=[2, 16, 29] topk=4 num_steps=4 max_nodes=24 dtype=bfloat16
+  new_tokens=78  rounds=30  accept/round=2.60
+  wall=9.20s  spec_tok/s=8.48  lossless=True
+  baseline(HF greedy) new_tokens=80  wall=1.25s  base_tok/s=64.15  speedup=0.13x
+
+2026-07-28 14:05:05
+[eagle3_sgl] target=NousResearch/Meta-Llama-3.1-8B-Instruct draft=yuhuili/EAGLE3-LLaMA3.1-Instruct-8B verify=full_model_tree(backend=auto) tree=cumulative ar_draft=True inc_acts=True inc_draft_ext=True eagle_layers=[2, 16, 29] topk=4 num_steps=4 max_nodes=24 dtype=bfloat16
+  new_tokens=49  rounds=20  accept/round=2.45
+  wall=1.92s  spec_tok/s=25.53  lossless=True
+  baseline(HF greedy) new_tokens=48  wall=0.75s  base_tok/s=63.95  speedup=0.40x
+

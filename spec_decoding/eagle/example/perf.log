@@ -1,0 +1,49 @@
+2026-06-07 01:18:12
+[eagle1] target=NousResearch/Meta-Llama-3-8B-Instruct draft=yuhuili/EAGLE-LLaMA3-Instruct-8B verify=reference_paths topk=4 num_steps=4 max_nodes=24 dtype=float16
+  new_tokens=64  rounds=29  accept/round=2.21
+  wall=10.66s  spec_tok/s=6.00  lossless=True
+  baseline(HF greedy) new_tokens=64  wall=1.42s  base_tok/s=45.02  speedup=0.13x
+
+2026-06-07 01:35:50
+[eagle1] target=NousResearch/Meta-Llama-3-8B-Instruct draft=yuhuili/EAGLE-LLaMA3-Instruct-8B verify=full_model_tree(backend=auto) topk=4 num_steps=4 max_nodes=24 dtype=float16
+  new_tokens=64  rounds=29  accept/round=2.21
+  wall=4.00s  spec_tok/s=16.02  lossless=True
+  baseline(HF greedy) new_tokens=64  wall=1.14s  base_tok/s=55.92  speedup=0.29x
+
+2026-06-07 01:36:22
+[eagle1] target=NousResearch/Meta-Llama-3-8B-Instruct draft=yuhuili/EAGLE-LLaMA3-Instruct-8B verify=reference_paths(backend=auto) topk=4 num_steps=4 max_nodes=24 dtype=float16
+  new_tokens=64  rounds=29  accept/round=2.21
+  wall=9.74s  spec_tok/s=6.57  lossless=True
+  baseline(HF greedy) new_tokens=64  wall=1.07s  base_tok/s=59.74  speedup=0.11x
+
+2026-06-07 01:39:02
+[eagle1] target=NousResearch/Meta-Llama-3-8B-Instruct draft=yuhuili/EAGLE-LLaMA3-Instruct-8B verify=full_model_tree(backend=auto) topk=4 num_steps=4 max_nodes=24 dtype=float16
+  new_tokens=64  rounds=29  accept/round=2.21
+  wall=3.27s  spec_tok/s=19.58  lossless=True
+  baseline(HF greedy) new_tokens=64  wall=1.24s  base_tok/s=51.56  speedup=0.38x
+
+2026-06-07 02:39:30
+[eagle1] target=Qwen/Qwen2.5-32B-Instruct draft=mit-han-lab/Qwen2.5-32B-Eagle-RL verify=full_model_tree(backend=auto) topk=4 num_steps=4 max_nodes=24 dtype=bfloat16
+  new_tokens=65  rounds=36  accept/round=1.81
+  wall=7.11s  spec_tok/s=9.15  lossless=False
+  baseline(HF greedy) new_tokens=63  wall=2.04s  base_tok/s=30.91  speedup=0.30x
+
+2026-06-07 02:43:15
+[eagle1] target=Qwen/Qwen2.5-32B-Instruct draft=mit-han-lab/Qwen2.5-32B-Eagle-RL verify=full_model_tree(backend=auto) topk=4 num_steps=4 max_nodes=24 dtype=bfloat16
+  new_tokens=65  rounds=36  accept/round=1.81
+  wall=6.31s  spec_tok/s=10.29
+  lossless(vs HF greedy use_cache=True)=False  [vs HF: first_div=49/63; vs clean-greedy: first_div=53/64]
+  baseline(HF greedy) new_tokens=63  wall=2.04s  base_tok/s=30.82  speedup=0.33x
+
+2026-07-28 13:53:20
+[eagle1] target=NousResearch/Meta-Llama-3-8B-Instruct draft=yuhuili/EAGLE-LLaMA3-Instruct-8B verify=full_model_tree(backend=auto) topk=4 num_steps=4 max_nodes=24 dtype=float16
+  new_tokens=64  rounds=29  accept/round=2.21
+  wall=2.62s  spec_tok/s=24.42  lossless=True
+  baseline(HF greedy) new_tokens=64  wall=1.01s  base_tok/s=63.34  speedup=0.39x
+
+2026-07-28 14:04:06
+[eagle1] target=NousResearch/Meta-Llama-3-8B-Instruct draft=yuhuili/EAGLE-LLaMA3-Instruct-8B verify=full_model_tree(backend=auto) topk=4 num_steps=4 max_nodes=24 dtype=float16
+  new_tokens=64  rounds=29  accept/round=2.21
+  wall=2.63s  spec_tok/s=24.35  lossless=True
+  baseline(HF greedy) new_tokens=64  wall=1.02s  base_tok/s=62.59  speedup=0.39x
+

@@ -1,0 +1,36 @@
+2026-06-07 03:04:42
+[eagle2] target=NousResearch/Meta-Llama-3-8B-Instruct draft=yuhuili/EAGLE-LLaMA3-Instruct-8B verify=full_model_tree(backend=auto) tree=cumulative topk=4 num_steps=5 max_nodes=32 dtype=float16
+  new_tokens=92  rounds=44  accept/round=2.09
+  wall=6.62s  spec_tok/s=13.89  lossless=True
+  baseline(HF greedy) new_tokens=91  wall=1.43s  base_tok/s=63.72  speedup=0.22x
+
+2026-06-07 03:05:32
+[eagle2] target=NousResearch/Meta-Llama-3-8B-Instruct draft=yuhuili/EAGLE-LLaMA3-Instruct-8B verify=full_model_tree(backend=triton_tree) tree=cumulative topk=4 num_steps=5 max_nodes=32 dtype=float16
+  new_tokens=92  rounds=44  accept/round=2.09
+  wall=6.17s  spec_tok/s=14.91  lossless=True
+  baseline(HF greedy) new_tokens=91  wall=1.44s  base_tok/s=63.21  speedup=0.24x
+
+2026-06-07 03:06:27
+[eagle2] target=NousResearch/Meta-Llama-3-8B-Instruct draft=yuhuili/EAGLE-LLaMA3-Instruct-8B verify=reference_paths(backend=auto) tree=cumulative topk=4 num_steps=5 max_nodes=32 dtype=float16
+  new_tokens=92  rounds=44  accept/round=2.09
+  wall=13.84s  spec_tok/s=6.65  lossless=True
+  baseline(HF greedy) new_tokens=91  wall=1.43s  base_tok/s=63.68  speedup=0.10x
+
+2026-06-07 03:07:11
+[eagle2] target=NousResearch/Meta-Llama-3-8B-Instruct draft=yuhuili/EAGLE-LLaMA3-Instruct-8B verify=full_model_tree(backend=triton_tree) tree=bfs topk=4 num_steps=5 max_nodes=32 dtype=float16
+  new_tokens=92  rounds=42  accept/round=2.19
+  wall=5.15s  spec_tok/s=17.86  lossless=True
+  baseline(HF greedy) new_tokens=91  wall=1.45s  base_tok/s=62.84  speedup=0.28x
+
+2026-07-28 13:53:42
+[eagle2] target=NousResearch/Meta-Llama-3-8B-Instruct draft=yuhuili/EAGLE-LLaMA3-Instruct-8B verify=full_model_tree(backend=auto) tree=cumulative topk=4 num_steps=5 max_nodes=32 dtype=float16
+  new_tokens=92  rounds=44  accept/round=2.09
+  wall=5.61s  spec_tok/s=16.41  lossless=True
+  baseline(HF greedy) new_tokens=91  wall=1.40s  base_tok/s=65.10  speedup=0.25x
+
+2026-07-28 14:04:27
+[eagle2] target=NousResearch/Meta-Llama-3-8B-Instruct draft=yuhuili/EAGLE-LLaMA3-Instruct-8B verify=full_model_tree(backend=auto) tree=cumulative topk=4 num_steps=5 max_nodes=32 dtype=float16
+  new_tokens=92  rounds=44  accept/round=2.09
+  wall=5.02s  spec_tok/s=18.32  lossless=True
+  baseline(HF greedy) new_tokens=91  wall=1.45s  base_tok/s=62.89  speedup=0.29x
+
