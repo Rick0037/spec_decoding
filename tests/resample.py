@@ -3,7 +3,7 @@ from collections import Counter
 
 
 p = [0.6, 0.3, 0.1]  # target
-q = [0.5, 0.4, 0.1]  # draft
+q = [0.2, 0.5, 0.3]  # draft
 
 
 def final_dist(p, q, resample):
