@@ -68,8 +68,40 @@ def suffix_match_test():
 # }
 
 
+def decoding_test():
+    parents = [-1, 0, 0, 1, 2]
+    n = len(parents)
+    mask = [[0] * n for _ in range(n)]
+    depth = [0] * n
+
+    for node, parent in enumerate(parents):
+        assert parent < node, "要求父节点排在子节点之前"
+        depth[node] = 0 if parent == -1 else depth[parent] + 1
+        cursor = node
+        while cursor != -1:          # 沿祖先链往上，逐个标记可见
+            mask[node][cursor] = 1
+            cursor = parents[cursor]
+
+    causal = [[1 if j <= i else 0 for j in range(n)] for i in range(n)]
+    print("相对 Position ID:", depth)
+    for i, (tree_row, causal_row) in enumerate(zip(mask, causal)):
+        leaked = [j for j in range(n) if causal_row[j] and not tree_row[j]]
+        print(f"节点 {i}: 树形 Mask {tree_row}  下三角会多看到 {leaked}")
+
+    assert mask[4] == [1, 0, 1, 0, 1]
+    assert depth[1] == depth[2] == 1
+
+    # 相对 Position ID: [0, 1, 1, 2, 2]
+    # 节点 0: 树形 Mask [1, 0, 0, 0, 0]  下三角会多看到 []
+    # 节点 1: 树形 Mask [1, 1, 0, 0, 0]  下三角会多看到 []
+    # 节点 2: 树形 Mask [1, 0, 1, 0, 0]  下三角会多看到 [1]
+    # 节点 3: 树形 Mask [1, 1, 0, 1, 0]  下三角会多看到 [2]
+    # 节点 4: 树形 Mask [1, 0, 1, 0, 1]  下三角会多看到 [1, 3]
+
+
 if __name__ == "__main__":
     if True:
-        suffix_match_test()
+        decoding_test()
+        # suffix_match_test()
     else:
         decoding_receive_test()
