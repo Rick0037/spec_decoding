@@ -99,9 +99,46 @@ def decoding_test():
     # 节点 4: 树形 Mask [1, 0, 1, 0, 1]  下三角会多看到 [1, 3]
 
 
+def accpect_rate_test():
+    # * 对比来说比如草稿快慢和验证的代码快慢本身可能会得出不一样的加速比
+    def expected_length(conditional_acceptance):
+        """E[L] = 1 + Σ Pr(K >= i)，输入为各位置的条件接受概率 a_i。"""
+        survival, total = 1.0, 1.0
+        for a in conditional_acceptance:
+            assert 0 <= a <= 1
+            survival *= a
+            total += survival
+        return total
+
+    base_ms = 10.0  # 假设普通 Decode 每 Token 10 ms
+    print(f"{'r':>2} {'E[L]':>6} {'便宜草稿':>8} {'昂贵草稿':>8}")
+    for gamma in [1, 2, 4, 8]:
+        # 每次的接受率都是0.8
+        length = expected_length([0.8] * gamma)
+        cheap_round = 10 + 0.7 * gamma + 0.1 * gamma ** 2  # 草稿快、验证增长慢
+        costly_round = 10 + 5.0 * gamma + 0.8 * gamma ** 2  # 草稿慢、验证增长快
+        print(f"{gamma:>2} {length:>6.3f} "
+              f"{base_ms * length / cheap_round:>8.3f} "
+              f"{base_ms * length / costly_round:>8.3f}")
+
+    assert expected_length([0.0] * 4) == 1
+    assert expected_length([1.0] * 4) == 5
+
+    # γ   E[L]     便宜草稿     昂贵草稿
+    # 1  1.800    1.667    1.139
+    # 2  2.440    2.068    1.052
+    # 4  3.362    2.334    0.785
+    # 8  4.329    1.968    0.428
+
+
 if __name__ == "__main__":
-    if True:
+    test_number = 3
+
+    if test_number == 1:
         decoding_test()
-        # suffix_match_test()
+    elif test_number == 2:
+        suffix_match_test()
+    elif test_number == 3:
+        accpect_rate_test()
     else:
         decoding_receive_test()
