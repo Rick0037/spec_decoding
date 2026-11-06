@@ -35,7 +35,7 @@ import torch
 import torch.nn as nn
 from transformers import PreTrainedModel
 
-from .speculative_decoding import SpeculativeConfig, _unwrap_hf
+from .speculative_decoding import SpeculativeConfig, _unwrap_pretrain_model
 
 
 def _kv_seq_len(past: Any) -> int:
@@ -97,8 +97,8 @@ def speculative_greedy_decode_opt(
     if config is None:
         config = SpeculativeConfig()
 
-    target_m = _unwrap_hf(target)
-    draft_m = _unwrap_hf(draft)
+    target_m = _unwrap_pretrain_model(target)
+    draft_m = _unwrap_pretrain_model(draft)
     device = input_ids.device
     gamma = max(1, int(config.num_draft_tokens))
     eos = config.eos_token_id
@@ -203,7 +203,7 @@ def speculative_greedy_decode_opt_from_strings(
 ) -> Tuple[torch.LongTensor, str]:
     """encode → speculative_greedy_decode_opt → decode 便捷封装."""
     enc = tokenizer(prompt, return_tensors="pt")
-    device = next(_unwrap_hf(target).parameters()).device
+    device = next(_unwrap_pretrain_model(target).parameters()).device
     input_ids = enc["input_ids"].to(device)
     if config is None:
         config = SpeculativeConfig()

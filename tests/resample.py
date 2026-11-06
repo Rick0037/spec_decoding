@@ -130,7 +130,7 @@ def accpect_rate_test():
     assert expected_length([0.0] * 4) == 1
     assert expected_length([1.0] * 4) == 5
 
-    # γ   E[L]     便宜草稿     昂贵草稿
+    # r   E[L]     便宜草稿     昂贵草稿
     # 1  1.800    1.667    1.139
     # 2  2.440    2.068    1.052
     # 4  3.362    2.334    0.785
