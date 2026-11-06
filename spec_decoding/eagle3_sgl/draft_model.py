@@ -10,7 +10,7 @@ EAGLE3 轻量 draft 网络(对齐官方 EAGLE3 llama_eagle3 结构)。
    draft 用自己的 lm_head: Linear(H, draft_vocab_size),输出在draft 词表上;
    再用 hot_token_id = d2t + arange 把 draft id 映射回 target id。未给定则回退复用
    target 的 lm_head(draft id 即 target id)。
-   
+
 注意: draft有独立此表的意义:target 的词表很大(如 128k)。但实际生成时,绝大多数概率质量集中在一小
 撮高频 token 上。EAGLE3 的观察是:draft 只需要在这热门子集(hot tokens,比如几万个)上猜就够了。
 2.1 draft 每步的 lm_head 矩阵乘和 softmax 维度从 V_target 降到 V_draft,draft 本来就追求轻量快速
@@ -40,8 +40,7 @@ def _unwrap(m: Union[PreTrainedModel, nn.Module]) -> PreTrainedModel:
     inner = getattr(m, "model", None)
     if inner is not None and isinstance(inner, PreTrainedModel):
         return inner
-    raise TypeError(
-        "target must be HF PreTrainedModel or BaseModelForCausalLM")
+    raise TypeError("target must be HF PreTrainedModel or BaseModelForCausalLM")
 
 
 class _RMSNorm(nn.Module):
@@ -93,8 +92,14 @@ class _Eagle3MidLayer(nn.Module):
     """
 
     def __init__(
-        self, hidden: int, n_heads: int, intermediate: int, n_kv_heads: int = None,
-        rope_base: float = 10000.0, eps: float = 1e-6, **fk,
+        self,
+        hidden: int,
+        n_heads: int,
+        intermediate: int,
+        n_kv_heads: int = None,
+        rope_base: float = 10000.0,
+        eps: float = 1e-6,
+        **fk,
     ) -> None:
         super().__init__()
         self.n_heads = n_heads
@@ -102,12 +107,11 @@ class _Eagle3MidLayer(nn.Module):
         self.head_dim = hidden // n_heads
         kv_dim = self.n_kv_heads * self.head_dim
         inv = 1.0 / (
-            rope_base ** (torch.arange(0, self.head_dim, 2,
-                          dtype=torch.float32) / self.head_dim)
+            rope_base
+            ** (torch.arange(0, self.head_dim, 2, dtype=torch.float32) / self.head_dim)
         )
         self.register_buffer("inv_freq", inv, persistent=False)
-        self.input_layernorm = _RMSNorm(
-            hidden, eps=eps, **fk)   # 归一化 token embedding
+        self.input_layernorm = _RMSNorm(hidden, eps=eps, **fk)  # 归一化 token embedding
         # 归一化(降维后的)多层 act —— EAGLE3 特有
         self.hidden_norm = _RMSNorm(hidden, eps=eps, **fk)
         self.post_attention_layernorm = _RMSNorm(hidden, eps=eps, **fk)
@@ -123,32 +127,32 @@ class _Eagle3MidLayer(nn.Module):
     def _attn(self, x2h: torch.Tensor) -> torch.Tensor:
         """对 [B,S,2H] 输入做(GQA)多头因果自注意力,输出 [B,S,H]."""
         b, s, _ = x2h.shape
-        q = self.q_proj(x2h).view(b, s, self.n_heads,
-                                  self.head_dim).transpose(1, 2)
-        k = self.k_proj(x2h).view(b, s, self.n_kv_heads,
-                                  self.head_dim).transpose(1, 2)
-        v = self.v_proj(x2h).view(b, s, self.n_kv_heads,
-                                  self.head_dim).transpose(1, 2)
+        q = self.q_proj(x2h).view(b, s, self.n_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(x2h).view(b, s, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(x2h).view(b, s, self.n_kv_heads, self.head_dim).transpose(1, 2)
         o = _sdpa_gqa(q, k, v, self.n_heads, self.n_kv_heads)
-        return self.o_proj(o.transpose(1, 2).contiguous().view(b, s, self.n_heads * self.head_dim))
+        return self.o_proj(
+            o.transpose(1, 2).contiguous().view(b, s, self.n_heads * self.head_dim)
+        )
 
     def forward(self, embeds: torch.Tensor, hidden: torch.Tensor) -> torch.Tensor:
         # EAGLE3:两条输入流(token embed vs target 多层 act 经 fc变换的 H),拼成 2H 再进注意力
-        residual = hidden                       # 残差流 = 降维后的多层 act
-        e = self.input_layernorm(embeds)         # 归一化 embed
+        residual = hidden  # 残差流 = 降维后的多层 act
+        e = self.input_layernorm(embeds)  # 归一化 embed
         # 归一化 高中低hidden(EAGLE3论文idea,已经经过了fc)
         hn = self.hidden_norm(hidden)
-        x = torch.cat([e, hn], dim=-1)           # [B,S,2H]
-        hidden = residual + self._attn(x)        # attn 输出 H + 残差
+        x = torch.cat([e, hn], dim=-1)  # [B,S,2H]
+        hidden = residual + self._attn(x)  # attn 输出 H + 残差
         residual = hidden
         h = self.post_attention_layernorm(hidden)
         mlp = self.down_proj(F.silu(self.gate_proj(h)) * self.up_proj(h))
-        return residual + mlp                    # [B,S,H]
+        return residual + mlp  # [B,S,H]
 
     def _rope_cos_sin(self, positions: torch.Tensor, device, dtype) -> tuple:
         pos = positions.to(device=device, dtype=torch.float32).view(-1)
-        freqs = pos[:, None] * \
-            self.inv_freq.to(device=device, dtype=torch.float32)[None, :]
+        freqs = (
+            pos[:, None] * self.inv_freq.to(device=device, dtype=torch.float32)[None, :]
+        )
         emb = torch.cat([freqs, freqs], dim=-1)
         return emb.cos(), emb.sin()
 
@@ -163,12 +167,9 @@ class _Eagle3MidLayer(nn.Module):
         e = self.input_layernorm(embeds)
         hn = self.hidden_norm(hidden)
         x = torch.cat([e, hn], dim=-1)
-        q = self.q_proj(x).view(b, S, self.n_heads,
-                                self.head_dim).transpose(1, 2)
-        k = self.k_proj(x).view(b, S, self.n_kv_heads,
-                                self.head_dim).transpose(1, 2)
-        v = self.v_proj(x).view(b, S, self.n_kv_heads,
-                                self.head_dim).transpose(1, 2)
+        q = self.q_proj(x).view(b, S, self.n_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(x).view(b, S, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(x).view(b, S, self.n_kv_heads, self.head_dim).transpose(1, 2)
         cos, sin = self._rope_cos_sin(positions, x.device, x.dtype)
         q = _apply_rope(q, cos, sin)
         k = _apply_rope(k, cos, sin)
@@ -178,8 +179,7 @@ class _Eagle3MidLayer(nn.Module):
         kk = k.repeat_interleave(rep, dim=1) if rep > 1 else k
         vv = v.repeat_interleave(rep, dim=1) if rep > 1 else v
         o = F.scaled_dot_product_attention(q, kk, vv, is_causal=True)
-        o = o.transpose(1, 2).contiguous().view(
-            b, S, self.n_heads * self.head_dim)
+        o = o.transpose(1, 2).contiguous().view(b, S, self.n_heads * self.head_dim)
         hidden = residual + self.o_proj(o)
         residual = hidden
         h = self.post_attention_layernorm(hidden)
@@ -199,12 +199,9 @@ class _Eagle3MidLayer(nn.Module):
         e = self.input_layernorm(embeds)
         hn = self.hidden_norm(hidden)
         x = torch.cat([e, hn], dim=-1)
-        q = self.q_proj(x).view(b, A, self.n_heads,
-                                self.head_dim).transpose(1, 2)
-        k = self.k_proj(x).view(b, A, self.n_kv_heads,
-                                self.head_dim).transpose(1, 2)
-        v = self.v_proj(x).view(b, A, self.n_kv_heads,
-                                self.head_dim).transpose(1, 2)
+        q = self.q_proj(x).view(b, A, self.n_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(x).view(b, A, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(x).view(b, A, self.n_kv_heads, self.head_dim).transpose(1, 2)
         positions = torch.arange(
             start_position, start_position + A, device=x.device, dtype=torch.long
         )
@@ -225,13 +222,11 @@ class _Eagle3MidLayer(nn.Module):
         idx_q = torch.arange(A, device=x.device).view(A, 1)
         idx_k = torch.arange(kk.shape[2], device=x.device).view(1, -1)
         allowed = idx_k <= (past_len + idx_q)
-        attn_mask = torch.zeros(
-            (A, kk.shape[2]), device=x.device, dtype=q.dtype)
+        attn_mask = torch.zeros((A, kk.shape[2]), device=x.device, dtype=q.dtype)
         attn_mask = attn_mask.masked_fill(~allowed, float("-inf"))
         attn_mask = attn_mask.unsqueeze(0).unsqueeze(0)
         o = F.scaled_dot_product_attention(q, kk, vv, attn_mask=attn_mask)
-        o = o.transpose(1, 2).contiguous().view(
-            b, A, self.n_heads * self.head_dim)
+        o = o.transpose(1, 2).contiguous().view(b, A, self.n_heads * self.head_dim)
         hidden = residual + self.o_proj(o)
         residual = hidden
         h = self.post_attention_layernorm(hidden)
@@ -250,14 +245,12 @@ class _Eagle3MidLayer(nn.Module):
         e = self.input_layernorm(embeds)
         hn = self.hidden_norm(hidden)
         x = torch.cat([e, hn], dim=-1)
-        q = self.q_proj(x).view(b, 1, self.n_heads,
-                                self.head_dim).transpose(1, 2)
-        k = self.k_proj(x).view(b, 1, self.n_kv_heads,
-                                self.head_dim).transpose(1, 2)
-        v = self.v_proj(x).view(b, 1, self.n_kv_heads,
-                                self.head_dim).transpose(1, 2)
-        cos, sin = self._rope_cos_sin(torch.tensor(
-            [position], device=x.device), x.device, x.dtype)
+        q = self.q_proj(x).view(b, 1, self.n_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(x).view(b, 1, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(x).view(b, 1, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        cos, sin = self._rope_cos_sin(
+            torch.tensor([position], device=x.device), x.device, x.dtype
+        )
         q = _apply_rope(q, cos, sin)
         k = _apply_rope(k, cos, sin)
         if past_kv is not None:
@@ -270,8 +263,7 @@ class _Eagle3MidLayer(nn.Module):
         kk = k.repeat_interleave(rep, dim=1) if rep > 1 else k
         vv = v.repeat_interleave(rep, dim=1) if rep > 1 else v
         o = F.scaled_dot_product_attention(q, kk, vv)
-        o = o.transpose(1, 2).contiguous().view(
-            b, 1, self.n_heads * self.head_dim)
+        o = o.transpose(1, 2).contiguous().view(b, 1, self.n_heads * self.head_dim)
         hidden = residual + self.o_proj(o)
         residual = hidden
         h = self.post_attention_layernorm(hidden)
@@ -283,8 +275,13 @@ class _PlainLayer(nn.Module):
     """标准单输入 pre-norm 层(仅 num_layers>1 时,midlayer 之后再叠的层)."""
 
     def __init__(
-        self, hidden: int, n_heads: int, intermediate: int, n_kv_heads: int = None,
-        eps: float = 1e-6, **fk,
+        self,
+        hidden: int,
+        n_heads: int,
+        intermediate: int,
+        n_kv_heads: int = None,
+        eps: float = 1e-6,
+        **fk,
     ) -> None:
         super().__init__()
         self.n_heads = n_heads
@@ -303,12 +300,9 @@ class _PlainLayer(nn.Module):
 
     def _attn(self, x: torch.Tensor) -> torch.Tensor:
         b, s, h = x.shape
-        q = self.q_proj(x).view(b, s, self.n_heads,
-                                self.head_dim).transpose(1, 2)
-        k = self.k_proj(x).view(b, s, self.n_kv_heads,
-                                self.head_dim).transpose(1, 2)
-        v = self.v_proj(x).view(b, s, self.n_kv_heads,
-                                self.head_dim).transpose(1, 2)
+        q = self.q_proj(x).view(b, s, self.n_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(x).view(b, s, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(x).view(b, s, self.n_kv_heads, self.head_dim).transpose(1, 2)
         o = _sdpa_gqa(q, k, v, self.n_heads, self.n_kv_heads)
         return self.o_proj(o.transpose(1, 2).contiguous().view(b, s, h))
 
@@ -359,8 +353,7 @@ class Eagle3SglDraftModel(nn.Module):
         tm = _unwrap(target)
         cfg = tm.config
         hidden = int(cfg.hidden_size)
-        n_heads = int(
-            getattr(cfg, "num_attention_heads", max(1, hidden // 64)))
+        n_heads = int(getattr(cfg, "num_attention_heads", max(1, hidden // 64)))
         n_kv_heads = int(getattr(cfg, "num_key_value_heads", n_heads))
         intermediate = int(getattr(cfg, "intermediate_size", 4 * hidden))
         rope_base = float(getattr(cfg, "rope_theta", 10000.0))
@@ -383,13 +376,19 @@ class Eagle3SglDraftModel(nn.Module):
         self.fc = nn.Linear(n_acts * hidden, hidden, bias=False, **fk)
         # (2) midlayer:embed/hidden 分别归一化后拼 2H 进 qkv(支持 GQA).
         self.midlayer = _Eagle3MidLayer(
-            hidden, n_heads, intermediate, n_kv_heads=n_kv_heads,
-            rope_base=rope_base, eps=eps, **fk
+            hidden,
+            n_heads,
+            intermediate,
+            n_kv_heads=n_kv_heads,
+            rope_base=rope_base,
+            eps=eps,
+            **fk,
         )
         self.extra_layers = nn.ModuleList(
             [
-                _PlainLayer(hidden, n_heads, intermediate,
-                            n_kv_heads=n_kv_heads, eps=eps, **fk)
+                _PlainLayer(
+                    hidden, n_heads, intermediate, n_kv_heads=n_kv_heads, eps=eps, **fk
+                )
                 for _ in range(max(0, num_layers - 1))
             ]
         )
@@ -399,12 +398,12 @@ class Eagle3SglDraftModel(nn.Module):
         self.draft_vocab_size = draft_vocab_size
         if draft_vocab_size is not None:
             self.lm_head = nn.Linear(
-                hidden, draft_vocab_size, bias=False, **fk)  # draft 自己的输出头
+                hidden, draft_vocab_size, bias=False, **fk
+            )  # draft 自己的输出头
             if d2t is None:
                 d2t = torch.zeros(draft_vocab_size, dtype=torch.long)
             # hot_token_id[draft_id] = 该 draft id 对应的 target vocab id
-            hot = d2t.to(torch.long) + \
-                torch.arange(draft_vocab_size, dtype=torch.long)
+            hot = d2t.to(torch.long) + torch.arange(draft_vocab_size, dtype=torch.long)
             self.register_buffer("hot_token_id", hot.to(device=device))
             self._shared_lmhead = None
         else:
@@ -487,7 +486,8 @@ class Eagle3SglDraftModel(nn.Module):
         """
         if self.extra_layers:
             raise NotImplementedError(
-                "autoregressive step supports num_layers=1 (midlayer only)")
+                "autoregressive step supports num_layers=1 (midlayer only)"
+            )
         embeds = self.embed(token_id)
         if cond.dim() == 2:
             cond = cond.unsqueeze(1)
@@ -526,15 +526,17 @@ class Eagle3SglDraftModel(nn.Module):
         """
         if self.extra_layers:
             raise NotImplementedError(
-                "autoregressive prefill supports num_layers=1 (midlayer only)")
-        ids = prefix_ids[:, 1:]       # EAGLE shift:draft 不消费 prompt 首 token
+                "autoregressive prefill supports num_layers=1 (midlayer only)"
+            )
+        ids = prefix_ids[:, 1:]  # EAGLE shift:draft 不消费 prompt 首 token
         # 位置 t 的 draft 条件 = target 在 t-1 的多层 act
         acts = target_acts_all[:, :-1, :]
         embeds = self.embed(ids)
         S = embeds.shape[1]
         if S == 0:
             raise ValueError(
-                "prefix too short for EAGLE3 draft prefill (need len >= 2)")
+                "prefix too short for EAGLE3 draft prefill (need len >= 2)"
+            )
         reduced = self.fc(acts.to(embeds.dtype))
         positions = torch.arange(S, device=embeds.device)  # RoPE 0..S-1
         # 整段因果 self-attn,输出末 hidden + 长度为prefill tokens的 KV(供后续 extend;KV 条数 = prefill token 数)
@@ -550,7 +552,7 @@ class Eagle3SglDraftModel(nn.Module):
         past_kv,
         start_position: int,
     ):
-        """	每轮 verify 后,在已有 draft KV 上增量 extend 本轮接受的 append token。
+        """每轮 verify 后,在已有 draft KV 上增量 extend 本轮接受的 append token。
 
         Parameters
         ----------
@@ -570,7 +572,8 @@ class Eagle3SglDraftModel(nn.Module):
         """
         if self.extra_layers:
             raise NotImplementedError(
-                "autoregressive extend supports num_layers=1 (midlayer only)")
+                "autoregressive extend supports num_layers=1 (midlayer only)"
+            )
         A = int(token_ids.shape[1])
         if A == 0:
             raise ValueError("extend_tokens requires at least one token")
@@ -581,8 +584,7 @@ class Eagle3SglDraftModel(nn.Module):
         embeds = self.embed(token_ids)
         reduced = self.fc(target_acts.to(embeds.dtype))
         # 批量更新 KV等draft state
-        h, kv = self.midlayer.extend(
-            embeds, reduced, past_kv, int(start_position))
+        h, kv = self.midlayer.extend(embeds, reduced, past_kv, int(start_position))
         last = self.norm(h)[:, -1, :]
         return self._lm_logits(last), h[:, -1, :], kv
 
@@ -635,8 +637,13 @@ def build_eagle3_sgl_draft(
       draft 词表大小一致(= len(d2t))。
     """
     m = Eagle3SglDraftModel(
-        target, eagle_layers, num_layers=num_layers,
-        draft_vocab_size=draft_vocab_size, d2t=d2t, device=device, dtype=dtype,
+        target,
+        eagle_layers,
+        num_layers=num_layers,
+        draft_vocab_size=draft_vocab_size,
+        d2t=d2t,
+        device=device,
+        dtype=dtype,
     )
     if draft_weights_path is not None:
         load_eagle3_draft_weights(m, draft_weights_path)
@@ -650,12 +657,15 @@ def _read_state_dict(path: str) -> dict:
 
     files: List[str]
     if os.path.isdir(path):
-        files = sorted(glob.glob(os.path.join(path, "*.safetensors"))) or sorted(
-            glob.glob(os.path.join(path, "*.bin"))
-        ) or sorted(glob.glob(os.path.join(path, "*.pt")))
+        files = (
+            sorted(glob.glob(os.path.join(path, "*.safetensors")))
+            or sorted(glob.glob(os.path.join(path, "*.bin")))
+            or sorted(glob.glob(os.path.join(path, "*.pt")))
+        )
         if not files:
             raise FileNotFoundError(
-                f"no weight file (*.safetensors/*.bin/*.pt) under {path}")
+                f"no weight file (*.safetensors/*.bin/*.pt) under {path}"
+            )
     else:
         files = [path]
 
@@ -668,8 +678,7 @@ def _read_state_dict(path: str) -> dict:
             sd.update(load_file(f))
         else:
             obj = torch.load(f, map_location="cpu", weights_only=True)
-            sd.update(obj.get("state_dict", obj)
-                      if isinstance(obj, dict) else obj)
+            sd.update(obj.get("state_dict", obj) if isinstance(obj, dict) else obj)
     return sd
 
 
@@ -681,7 +690,7 @@ def _translate_eagle3_name(name: str) -> str:
     - 去掉 mlp. 段(如 midlayer.mlp.gate_proj → midlayer.gate_proj)。
     """
     if name.startswith("model."):
-        name = name[len("model."):]
+        name = name[len("model.") :]
     return name.replace("self_attn.", "").replace("mlp.", "")
 
 
@@ -728,20 +737,20 @@ def load_eagle3_draft_weights(
 def make_eagle3_sgl_draft_topk_fn(draft_model: Eagle3SglDraftModel, topk: int):
     """工厂:把 Eagle3SglDraftModel 包成 tree_draft.DraftTopkFn。
 
-    若 draft 用独立词表(hot_token_id 非空),topk 得到的是 draft id,会经 d2t 映射成
-    target vocab id 再返回(树与 verify 始终在 target 词表空间)。
+        若 draft 用独立词表(hot_token_id 非空),topk 得到的是 draft id,会经 d2t 映射成
+        target vocab id 再返回(树与 verify 始终在 target 词表空间)。
 
-    问题: 有了独立词表后,topk fn输出的draft topk ids为什么要映射回target id?
-    答: 要统一draft 词表的 id 和 target 词表的 id 不是一回事。draft lm_head 输出的是
-draft 词表空间里的下标(0..V_draft-1),它和 target 真实 token id 没有直接对应
-    关系——d2t(draft-to-target)就是这个对应关系:target_id = hot_token_id[draft_id]
-    (代码里 hot_token_id = d2t + arange)。
+        问题: 有了独立词表后,topk fn输出的draft topk ids为什么要映射回target id?
+        答: 要统一draft 词表的 id 和 target 词表的 id 不是一回事。draft lm_head 输出的是
+    draft 词表空间里的下标(0..V_draft-1),它和 target 真实 token id 没有直接对应
+        关系——d2t(draft-to-target)就是这个对应关系:target_id = hot_token_id[draft_id]
+        (代码里 hot_token_id = d2t + arange)。
 
-    回忆eagle1和eagle2,两步都在 target 词表空间工作:
+        回忆eagle1和eagle2,两步都在 target 词表空间工作:
 
-    1.建 draft 树:树节点要存真实 token,下一步还要用它去 embed、拼前缀;
-    2.target verify:target 用自己的完整词表逐位 argmax 比对,比较对象必须是 target id
-    否则树里存的就是错的 id,verify 也无法对齐
+        1.建 draft 树:树节点要存真实 token,下一步还要用它去 embed、拼前缀;
+        2.target verify:target 用自己的完整词表逐位 argmax 比对,比较对象必须是 target id
+        否则树里存的就是错的 id,verify 也无法对齐
 
     """
 

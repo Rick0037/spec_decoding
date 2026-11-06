@@ -67,8 +67,7 @@ def layout_tree_position_ids(
     layout: TreeVerifyLayout, past_len: int
 ) -> torch.LongTensor:
     """Absolute position_ids for batched tree verify, shape [L]."""
-    depths = [node_depth_from_root(layout.parent, i)
-              for i in range(len(layout))]
+    depths = [node_depth_from_root(layout.parent, i) for i in range(len(layout))]
     return torch.tensor(depths, dtype=torch.long) + int(past_len)
 
 

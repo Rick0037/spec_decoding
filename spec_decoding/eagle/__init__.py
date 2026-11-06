@@ -95,7 +95,11 @@ def __getattr__(name: str) -> Any:
         from .tree_verify_full import select_append_from_full_tree_logits
 
         return select_append_from_full_tree_logits
-    if name in ("resolve_verify_attn_backend", "flash_attn_available", "triton_extend_available"):
+    if name in (
+        "resolve_verify_attn_backend",
+        "flash_attn_available",
+        "triton_extend_available",
+    ):
         from . import tree_verify_attn as tva
 
         return getattr(tva, name)

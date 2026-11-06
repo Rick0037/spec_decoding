@@ -39,8 +39,7 @@ def main() -> None:
 
     n_layers = int(
         getattr(
-            target.config, "num_hidden_layers", getattr(
-                target.config, "n_layer", 2)
+            target.config, "num_hidden_layers", getattr(target.config, "n_layer", 2)
         )
     )
     eagle_layers = [0, 1] if n_layers <= 2 else None  # tiny 模型层数少,显式指定

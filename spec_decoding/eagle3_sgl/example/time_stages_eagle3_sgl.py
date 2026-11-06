@@ -73,8 +73,7 @@ class StageTimer:
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--target", default="meta-llama/Llama-3.1-8B-Instruct")
-    p.add_argument("--eagle3-draft",
-                   default="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")
+    p.add_argument("--eagle3-draft", default="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")
     p.add_argument(
         "--prompt", default="Explain what speculative decoding is, in two sentences."
     )
@@ -108,8 +107,7 @@ def main():
 
     tok, target, target_id = _load_target(args.target, device, dtype)
     n_layers = int(target.config.num_hidden_layers)
-    draft_cfg = json.load(
-        open(hf_hub_download(args.eagle3_draft, "config.json")))
+    draft_cfg = json.load(open(hf_hub_download(args.eagle3_draft, "config.json")))
     draft_bin = hf_hub_download(args.eagle3_draft, "pytorch_model.bin")
     cfg = Eagle3SglConfig(
         topk=args.topk,
@@ -151,8 +149,7 @@ def main():
 
     # warmup
     with torch.inference_mode():
-        gen.generate(input_ids, max_new_tokens=args.warmup_tokens,
-                     eos_token_id=eos)
+        gen.generate(input_ids, max_new_tokens=args.warmup_tokens, eos_token_id=eos)
     gen.n_rounds = 0
     gen.n_accepted_tokens = 0
 
@@ -162,8 +159,7 @@ def main():
     gen.draft_model.extend_tokens = T.wrap(
         "draft_extend", gen.draft_model.extend_tokens
     )
-    gen.draft_model.prefill = T.wrap(
-        "draft_prefill_init", gen.draft_model.prefill)
+    gen.draft_model.prefill = T.wrap("draft_prefill_init", gen.draft_model.prefill)
 
     # target forward:区分 prefill(首次) / verify(内部) / replay(其余)
     _orig_tf = gen.target_m.forward

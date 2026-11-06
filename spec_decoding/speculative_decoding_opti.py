@@ -49,7 +49,14 @@ def _kv_seq_len(past: Any) -> int:
 def _crop_kv(past: Any, length: int) -> Any:
     """Truncate a KV cache to length positions (drops rejected draft KV)."""
     if hasattr(past, "crop"):
-        past.crop(length)
+        cur = _kv_seq_len(past)
+        if cur > length:
+            try:
+                past.crop(length - cur)  # transformers 5.x:负数=删除 N 个
+            except (TypeError, ValueError):
+                past.crop(length)
+            if _kv_seq_len(past) != length:
+                past.crop(length)  # transformers 4.x:正数=目标长度
         return past
     # legacy tuple format: [(k, v), ...] with k/v shape [b, h, seq, d]
     return tuple(
@@ -118,10 +125,8 @@ def speculative_greedy_decode_opt(
         att_full = torch.ones_like(out_ids, device=device)
         pref_d = draft_m(out_ids, attention_mask=att_full, use_cache=True)
         cur_past_d = pref_d.past_key_values
-        draft_tokens: List[int] = [
-            int(pref_d.logits[:, -1, :].argmax(dim=-1).item())]
-        inp = torch.tensor([[draft_tokens[-1]]],
-                           device=device, dtype=torch.long)
+        draft_tokens: List[int] = [int(pref_d.logits[:, -1, :].argmax(dim=-1).item())]
+        inp = torch.tensor([[draft_tokens[-1]]], device=device, dtype=torch.long)
         for _ in range(gamma - 1):
             if eos is not None and draft_tokens[-1] == eos:
                 break
@@ -129,8 +134,7 @@ def speculative_greedy_decode_opt(
                 inp,
                 past_key_values=cur_past_d,
                 use_cache=True,
-                attention_mask=torch.ones(
-                    1, 1, device=device, dtype=torch.long),
+                attention_mask=torch.ones(1, 1, device=device, dtype=torch.long),
             )
             nxt = int(step.logits[:, -1, :].argmax(dim=-1).item())
             draft_tokens.append(nxt)
@@ -139,8 +143,7 @@ def speculative_greedy_decode_opt(
         g = len(draft_tokens)
 
         # ---------- Phase B — Verify:把 g 个 draft 增量追加到 target KV ----------
-        draft_batch = torch.tensor(
-            [draft_tokens], device=device, dtype=torch.long)
+        draft_batch = torch.tensor([draft_tokens], device=device, dtype=torch.long)
         out_v = target_m(
             draft_batch,
             past_key_values=past_t,
@@ -256,8 +259,7 @@ def _main() -> None:
         )
     base_cont = base[0, plen:]
 
-    cfg = SpeculativeConfig(num_draft_tokens=gamma,
-                            eos_token_id=tok.eos_token_id)
+    cfg = SpeculativeConfig(num_draft_tokens=gamma, eos_token_id=tok.eos_token_id)
     out, text = speculative_greedy_decode_opt_from_strings(
         target, draft, tok, prompt, max_new_tokens=max_new, config=cfg
     )

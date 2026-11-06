@@ -128,8 +128,7 @@ def tree_verify_attention_context(
                 )
             return causal
 
-        decoder._update_causal_mask = types.MethodType(
-            _patched_update, decoder)
+        decoder._update_causal_mask = types.MethodType(_patched_update, decoder)
         originals.append(("_update_causal_mask", orig))
 
     if hasattr(decoder, "_prepare_decoder_attention_mask"):
@@ -170,6 +169,13 @@ def tree_verify_attention_context(
 
 
 # 根据topk,选择不同的verify attn backend,可以是flash attn(topk=1),triton attn(topk>1),eager(回退)
+def _has_legacy_mask_hooks(decoder: nn.Module) -> bool:
+    """transformers<5 用 _update_causal_mask 造 mask;5.x 改成了 create_causal_mask。"""
+    return hasattr(decoder, "_update_causal_mask") or hasattr(
+        decoder, "_prepare_decoder_attention_mask"
+    )
+
+
 @torch.inference_mode()
 def full_model_tree_verify_logits(
     target_m: PreTrainedModel,
@@ -193,11 +199,9 @@ def full_model_tree_verify_logits(
         v = getattr(target_m.config, "vocab_size", 0)
         return torch.zeros(1, 0, v, device=device)
 
-    draft_ids = torch.tensor(
-        [layout.token_ids], device=device, dtype=torch.long)
+    draft_ids = torch.tensor([layout.token_ids], device=device, dtype=torch.long)
     # position ids表示某个token id在树的深度,同一层的token id则position id一样
-    position_ids = layout_tree_position_ids(
-        layout, past_len).unsqueeze(0).to(device)
+    position_ids = layout_tree_position_ids(layout, past_len).unsqueeze(0).to(device)
     tree_block = build_tree_allow_mask_4d(layout, device=device)
     decoder = _decoder_stack(target_m)
     backend = resolve_verify_attn_backend(
@@ -211,15 +215,27 @@ def full_model_tree_verify_logits(
     )
 
     if backend == "eager":
-        with tree_verify_attention_context(decoder, tree_block):
-            out = target_m(draft_ids, **fwd_kw)
+        if _has_legacy_mask_hooks(decoder):
+            with tree_verify_attention_context(decoder, tree_block):
+                out = target_m(draft_ids, **fwd_kw)
+        else:
+            # transformers>=5.x 没有 _update_causal_mask 钩子,不能靠 patch 注入树掩码;
+            # 直接把 [1,1,L,past+L] 的 4D additive(树+前缀)掩码传给模型。
+            cross = build_tree_cross_attn_bias_with_prefix(
+                layout,
+                past_len,
+                device=device,
+                dtype=next(target_m.parameters()).dtype,
+            ).view(1, 1, l_n, past_len + l_n)
+            fwd_kw["attention_mask"] = cross
+            with tree_verify_attention_context(decoder, None):
+                out = target_m(draft_ids, **fwd_kw)
     elif backend == "flash_attn":
         with tree_verify_attention_context_flash(decoder):
             out = target_m(draft_ids, **fwd_kw)
     elif backend == "triton_tree":
         # 构建metadata,包括custommask
-        meta = build_triton_tree_verify_metadata(
-            layout, past_len, device=device)
+        meta = build_triton_tree_verify_metadata(layout, past_len, device=device)
         # patch attn为tree attention,使用extend attention fwd,然后在target fwd
         with tree_verify_triton_attention_context(decoder, meta):
             out = target_m(draft_ids, **fwd_kw)
@@ -266,6 +282,24 @@ def select_append_from_full_tree_logits(
 # 在 cache 副本上跑(不污染 past).root 接受用 recovery_logits(out_ids 之后那一位 logits).
 # 正确的 parent→child 接受:节点 i 的输出预测其子节点(避免 select_append 的 off-by-one).
 # -----------------------------------------------------------------------------
+def _crop_cache_back_to(past_key_values: Any, target_len: int) -> None:
+    """把 KV cache 截回 target_len。
+
+    transformers 5.20+ 的 DynamicCache.crop 只接受负数(删除 N 个),旧的
+    “正数=目标长度”会直接抛 ValueError;4.x 则相反,只认正数。这里优先负数,
+    截完校验长度,不生效再退回正数。
+    """
+    cur = int(past_key_values.get_seq_length())
+    if cur <= target_len:
+        return
+    try:
+        past_key_values.crop(-(cur - target_len))
+    except (TypeError, ValueError):
+        past_key_values.crop(target_len)
+    if int(past_key_values.get_seq_length()) != target_len:
+        past_key_values.crop(target_len)
+
+
 def _extend_then_crop(
     target_m, tree_tokens, past_key_values, *, position_ids, attention_mask
 ):
@@ -282,7 +316,9 @@ def _extend_then_crop(
         attention_mask=attention_mask,
     )
     logits0 = out.logits[0]
-    past_key_values.crop(before)  # 去掉本次 verify 追加的树 KV,还原成 out_ids 的 KV
+    _crop_cache_back_to(
+        past_key_values, before
+    )  # 去掉本次 verify 追加的树 KV,还原成 out_ids 的 KV
     return logits0
 
 
@@ -345,8 +381,7 @@ def full_tree_verify_extend(
     """
     L = len(layout)
     dtype = next(target_m.parameters()).dtype
-    tree_tokens = torch.tensor(
-        [layout.token_ids], device=device, dtype=torch.long)
+    tree_tokens = torch.tensor([layout.token_ids], device=device, dtype=torch.long)
     cross = build_tree_cross_attn_bias_with_prefix(
         layout, past_len, device=device, dtype=dtype
     ).view(1, 1, L, past_len + L)
@@ -377,8 +412,7 @@ def full_tree_verify_triton(
     数值与 full_tree_verify_extend 等价;同样在 cache 副本上跑、root 接受用 recovery_logits。
     """
     L = len(layout)
-    tree_tokens = torch.tensor(
-        [layout.token_ids], device=device, dtype=torch.long)
+    tree_tokens = torch.tensor([layout.token_ids], device=device, dtype=torch.long)
     pos = layout_tree_position_ids(layout, past_len).unsqueeze(0).to(device)
     meta = build_triton_tree_verify_metadata(layout, past_len, device=device)
     decoder = _decoder_stack(target_m)

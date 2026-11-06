@@ -61,8 +61,7 @@ def _unwrap(m: Union[PreTrainedModel, nn.Module]) -> PreTrainedModel:
     inner = getattr(m, "model", None)
     if inner is not None and isinstance(inner, PreTrainedModel):
         return inner
-    raise TypeError(
-        "target must be HF PreTrainedModel or BaseModelForCausalLM")
+    raise TypeError("target must be HF PreTrainedModel or BaseModelForCausalLM")
 
 
 def _leaf_indices(parent: List[int]) -> List[int]:
@@ -112,8 +111,7 @@ def _verify_path_clean(
 
     P = int(full_prefix_ids.shape[1])
     full = torch.cat(
-        [full_prefix_ids, torch.tensor(
-            [path_tokens], device=device, dtype=torch.long)],
+        [full_prefix_ids, torch.tensor([path_tokens], device=device, dtype=torch.long)],
         dim=1,
     )
     logits = target_m(
@@ -131,8 +129,7 @@ def _verify_path_clean(
             corr = g
             break
     if mlen == len(path_tokens):
-        nxt = int(logits[P - 1 + len(path_tokens)
-                         ].argmax(dim=-1).item())  # bonus
+        nxt = int(logits[P - 1 + len(path_tokens)].argmax(dim=-1).item())  # bonus
     else:
         nxt = int(corr)
     return mlen, nxt
@@ -238,10 +235,8 @@ class Eagle1Generator:
         leaves = _leaf_indices(draft_res.parent)
         # 没有叶子,说明只有root token,没有path tokens
         if not leaves:
-            _, nxt = _verify_path_clean(
-                self.target_m, full_prefix_ids, [], device)
-            bias = build_tree_sdpa_attn_bias(
-                layout, device=device, dtype=torch.float32)
+            _, nxt = _verify_path_clean(self.target_m, full_prefix_ids, [], device)
+            bias = build_tree_sdpa_attn_bias(layout, device=device, dtype=torch.float32)
             return (
                 torch.tensor([[nxt]], device=device, dtype=torch.long),
                 layout,
@@ -250,8 +245,7 @@ class Eagle1Generator:
             )
         if self.cfg.verify_mode == "full_model_tree":
             if recovery_logits is None:
-                raise ValueError(
-                    "full_model_tree verify requires recovery_logits")
+                raise ValueError("full_model_tree verify requires recovery_logits")
             # 复用前缀 KV 的 extend verify(只前向 L 个树节点,不重算前缀);正确 parent→child 接受.
             # backend=triton_tree(或 auto+topk>1+triton 可用);否则 HF sdpa.
             backend = self.cfg.verify_attn_backend
@@ -272,8 +266,7 @@ class Eagle1Generator:
                 leaves=leaves,
                 device=device,
             )
-            append = torch.tensor(
-                [append_list], device=device, dtype=torch.long)
+            append = torch.tensor([append_list], device=device, dtype=torch.long)
             cross_bias = build_tree_cross_attn_bias_with_prefix(
                 layout, past_len, device=device, dtype=torch.float32
             )
@@ -284,17 +277,14 @@ class Eagle1Generator:
 
         # 为reference_paths时走到下面代码
         # 逐叶子路径各做一次 target 前向(_verify_path_clean),有几个叶子就跑几次;不用树注意力
-        bias = build_tree_sdpa_attn_bias(
-            layout, device=device, dtype=torch.float32)
+        bias = build_tree_sdpa_attn_bias(layout, device=device, dtype=torch.float32)
         best_m = -1
         best_li = 10**9
         best_next = 0
         best_leaf = 0
         for li, leaf in enumerate(leaves):
-            path = _path_tokens_to_leaf(
-                draft_res.parent, draft_res.token_ids, leaf)
-            mlen, nxt = _verify_path_clean(
-                self.target_m, full_prefix_ids, path, device)
+            path = _path_tokens_to_leaf(draft_res.parent, draft_res.token_ids, leaf)
+            mlen, nxt = _verify_path_clean(self.target_m, full_prefix_ids, path, device)
             if mlen > best_m or (mlen == best_m and li < best_li):
                 best_m, best_li, best_next, best_leaf = mlen, li, nxt, leaf
 

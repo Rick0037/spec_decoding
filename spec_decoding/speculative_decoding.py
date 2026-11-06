@@ -113,11 +113,9 @@ def speculative_greedy_decode(
         cur_past_d = pref_d.past_key_values
         # logits.shape=[batch, seq_len, vocab_size]
         # logits[:, -1, :].argmax(dim=-1).shape = [batch, 1],表示在词汇表里面取概率最高的token
-        draft_tokens: list[int] = [
-            int(pref_d.logits[:, -1, :].argmax(dim=-1).item())]
+        draft_tokens: list[int] = [int(pref_d.logits[:, -1, :].argmax(dim=-1).item())]
 
-        inp = torch.tensor([[draft_tokens[-1]]],
-                           device=device, dtype=torch.long)
+        inp = torch.tensor([[draft_tokens[-1]]], device=device, dtype=torch.long)
         # decoding
         for _ in range(gamma - 1):
             if eos is not None and draft_tokens[-1] == eos:
@@ -126,8 +124,7 @@ def speculative_greedy_decode(
                 inp,
                 past_key_values=cur_past_d,  # decoding需要kv cache提速
                 use_cache=True,
-                attention_mask=torch.ones(
-                    1, 1, device=device, dtype=torch.long),
+                attention_mask=torch.ones(1, 1, device=device, dtype=torch.long),
             )
             nxt = int(step.logits[:, -1, :].argmax(dim=-1).item())
             draft_tokens.append(nxt)
@@ -143,8 +140,7 @@ def speculative_greedy_decode(
         # 整段前向里第 prefix_len-1+j 个位置的 logits 即 d_j 所在位置的 target greedy:
         #   - d_0 的真值 = logits[prefix_len-1](吃完真实前缀后的预测);
         #   - 全accept 时 bonus = logits[prefix_len-1+g](最后一格).
-        draft_batch = torch.tensor(
-            [draft_tokens], device=device, dtype=torch.long)
+        draft_batch = torch.tensor([draft_tokens], device=device, dtype=torch.long)
         prefix_len = int(out_ids.shape[1])
         full = torch.cat([out_ids, draft_batch], dim=1)
         out_full = target_m(

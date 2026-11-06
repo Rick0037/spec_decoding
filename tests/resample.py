@@ -38,8 +38,12 @@ def decoding_receive_test():
         else:
             token = rng.choices(range(3), weights=residual)[0]
         counts[token] += 1
-    print("经验分布:", [counts[i] / trials for i in range(3)],
-          "接受率:", accepted / trials)
+    print(
+        "经验分布:",
+        [counts[i] / trials for i in range(3)],
+        "接受率:",
+        accepted / trials,
+    )
 
 
 def suffix_match_test():
@@ -49,16 +53,16 @@ def suffix_match_test():
             tail = history[-n:]
             # 起点 < len - n，排除尾巴自身；从前往后扫，取最早的匹配
             for start in range(len(history) - n):
-                if history[start:start + n] == tail:
-                    return n, history[start + n:start + n + k]
+                if history[start : start + n] == tail:
+                    return n, history[start + n : start + n + k]
         return None, []
 
     h1 = [10, 11, 12, 20, 21, 99, 10, 11, 12]
-    print("h1:", propose(h1))                      # (3, [20, 21, 99])
+    print("h1:", propose(h1))  # (3, [20, 21, 99])
     print("h1 只允许 4-gram:", propose(h1, min_n=4))  # (None, [])
 
-    h2 = [7, 8, 1, 7, 8, 2, 7, 8]                  # 尾巴 [7, 8] 出现过两次
-    print("h2:", propose(h2))                      # 取最早一处：(2, [1, 7, 8])
+    h2 = [7, 8, 1, 7, 8, 2, 7, 8]  # 尾巴 [7, 8] 出现过两次
+    print("h2:", propose(h2))  # 取最早一处：(2, [1, 7, 8])
     print("没有重复:", propose([1, 2, 3, 4, 5]))
 
 
@@ -78,7 +82,7 @@ def decoding_test():
         assert parent < node, "要求父节点排在子节点之前"
         depth[node] = 0 if parent == -1 else depth[parent] + 1
         cursor = node
-        while cursor != -1:          # 沿祖先链往上，逐个标记可见
+        while cursor != -1:  # 沿祖先链往上，逐个标记可见
             mask[node][cursor] = 1
             cursor = parents[cursor]
 
@@ -115,11 +119,13 @@ def accpect_rate_test():
     for gamma in [1, 2, 4, 8]:
         # 每次的接受率都是0.8
         length = expected_length([0.8] * gamma)
-        cheap_round = 10 + 0.7 * gamma + 0.1 * gamma ** 2  # 草稿快、验证增长慢
-        costly_round = 10 + 5.0 * gamma + 0.8 * gamma ** 2  # 草稿慢、验证增长快
-        print(f"{gamma:>2} {length:>6.3f} "
-              f"{base_ms * length / cheap_round:>8.3f} "
-              f"{base_ms * length / costly_round:>8.3f}")
+        cheap_round = 10 + 0.7 * gamma + 0.1 * gamma**2  # 草稿快、验证增长慢
+        costly_round = 10 + 5.0 * gamma + 0.8 * gamma**2  # 草稿慢、验证增长快
+        print(
+            f"{gamma:>2} {length:>6.3f} "
+            f"{base_ms * length / cheap_round:>8.3f} "
+            f"{base_ms * length / costly_round:>8.3f}"
+        )
 
     assert expected_length([0.0] * 4) == 1
     assert expected_length([1.0] * 4) == 5

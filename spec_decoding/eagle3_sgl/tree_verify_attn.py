@@ -78,8 +78,7 @@ def resolve_verify_attn_backend(
             "verify_attn_backend must be auto, eager, flash_attn, or triton_tree"
         )
     if b == "flash_attn" and not flash_attn_available():
-        raise RuntimeError(
-            "flash_attn requested but flash-attn is not available")
+        raise RuntimeError("flash_attn requested but flash-attn is not available")
     if b == "triton_tree" and not triton_extend_available():
         raise RuntimeError(
             "triton_tree requested but triton extend kernel is unavailable"
@@ -121,12 +120,10 @@ def build_triton_tree_verify_metadata(
     custom_mask = (cross == 0).reshape(-1).to(torch.bool)
     qo_indptr = torch.tensor([0, l_n], dtype=torch.int32, device=device)
     # 前缀 KV 长度 = past_len(不含 extend)
-    kv_indptr = torch.tensor(
-        [0, int(past_len)], dtype=torch.int32, device=device)
+    kv_indptr = torch.tensor([0, int(past_len)], dtype=torch.int32, device=device)
     kv_indices = torch.arange(int(past_len), dtype=torch.int32, device=device)
     # mask 行 stride = total_kv(前缀 + extend),与 kernel 的 cur_seq_len 一致
-    mask_indptr = torch.tensor(
-        [0, l_n * total_kv], dtype=torch.int32, device=device)
+    mask_indptr = torch.tensor([0, l_n * total_kv], dtype=torch.int32, device=device)
     return TritonTreeVerifyMetadata(
         qo_indptr=qo_indptr,
         kv_indptr=kv_indptr,
@@ -194,8 +191,7 @@ def _layer_idx(module: nn.Module) -> int:
     idx = getattr(module, "layer_idx", None)
     if idx is not None:
         return int(idx)
-    raise AttributeError(
-        "self_attn.layer_idx is required for triton tree verify")
+    raise AttributeError("self_attn.layer_idx is required for triton tree verify")
 
 
 # 植入了triton custom mask attn的attn layer
@@ -219,8 +215,7 @@ def _triton_tree_attn_forward(
     ctx: TritonTreeVerifyMetadata = module._llmqrt_triton_meta
     bsz, q_len, _ = hidden_states.shape
     if bsz != 1:
-        raise NotImplementedError(
-            "triton_tree verify supports batch_size=1 only")
+        raise NotImplementedError("triton_tree verify supports batch_size=1 only")
 
     # transformers 5.x 把头数从 attention 模块挪到了 config,这里两种命名都兼容.
     mcfg = getattr(module, "config", None)
@@ -239,12 +234,10 @@ def _triton_tree_attn_forward(
         .transpose(1, 2)
     )
     key_states = (
-        module.k_proj(hidden_states).view(
-            bsz, q_len, num_kv, head_dim).transpose(1, 2)
+        module.k_proj(hidden_states).view(bsz, q_len, num_kv, head_dim).transpose(1, 2)
     )
     value_states = (
-        module.v_proj(hidden_states).view(
-            bsz, q_len, num_kv, head_dim).transpose(1, 2)
+        module.v_proj(hidden_states).view(bsz, q_len, num_kv, head_dim).transpose(1, 2)
     )
 
     query_states, key_states = _apply_rotary(
@@ -263,12 +256,9 @@ def _triton_tree_attn_forward(
         )
 
     # extend_attention_fwd expects Q with all heads, K/V with kv heads (GQA inside kernel).
-    q = query_states.transpose(
-        1, 2).reshape(-1, num_heads, head_dim).contiguous()
-    k_all = key_states.transpose(
-        1, 2).reshape(-1, num_kv, head_dim).contiguous()
-    v_all = value_states.transpose(
-        1, 2).reshape(-1, num_kv, head_dim).contiguous()
+    q = query_states.transpose(1, 2).reshape(-1, num_heads, head_dim).contiguous()
+    k_all = key_states.transpose(1, 2).reshape(-1, num_kv, head_dim).contiguous()
+    v_all = value_states.transpose(1, 2).reshape(-1, num_kv, head_dim).contiguous()
     l_ext = ctx.extend_len
     k_extend = k_all[-l_ext:]
     v_extend = v_all[-l_ext:]

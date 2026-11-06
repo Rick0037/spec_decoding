@@ -12,6 +12,7 @@ CUDA_CAPABILITY = (0, 0)
 if _is_cuda:
     CUDA_CAPABILITY = torch.cuda.get_device_capability()
 
+
 def _get_block_sizes_for_extend_attention(Lq: int, Lv: int):
     """
     Get block sizes and configuration for extend attention kernels.
@@ -622,4 +623,3 @@ def extend_attention_fwd(
         num_warps=num_warps,
         num_stages=num_stages,
     )
-

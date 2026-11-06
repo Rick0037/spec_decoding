@@ -80,8 +80,7 @@ def expand_draft_tree(
     root_parent_token_id: torch.LongTensor,
     draft_topk_fn: DraftTopkFn,
     *,
-    target_hidden_refresh: Optional[Callable[[
-        torch.LongTensor], torch.Tensor]] = None,
+    target_hidden_refresh: Optional[Callable[[torch.LongTensor], torch.Tensor]] = None,
     initial_prefix_ids: Optional[torch.LongTensor] = None,
 ) -> TreeDraftResult:
     """

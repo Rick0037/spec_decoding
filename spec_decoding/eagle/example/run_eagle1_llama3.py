@@ -52,8 +52,7 @@ def _load_target(target_id: str, device, dtype):
 def main() -> None:
     p = argparse.ArgumentParser(description="Real EAGLE-1 on Llama-3-8B")
     p.add_argument("--target", default="meta-llama/Meta-Llama-3-8B-Instruct")
-    p.add_argument("--eagle1-draft",
-                   default="yuhuili/EAGLE-LLaMA3-Instruct-8B")
+    p.add_argument("--eagle1-draft", default="yuhuili/EAGLE-LLaMA3-Instruct-8B")
     p.add_argument(
         "--prompt", default="Explain what speculative decoding is, in two sentences."
     )
@@ -81,8 +80,7 @@ def main() -> None:
     args = p.parse_args()
 
     device = torch.device(
-        args.device if (torch.cuda.is_available()
-                        or args.device == "cpu") else "cpu"
+        args.device if (torch.cuda.is_available() or args.device == "cpu") else "cpu"
     )
     dtype = {
         "float16": torch.float16,
@@ -116,8 +114,7 @@ def main() -> None:
         verify_attn_backend=args.verify_attn_backend,
     )
     # 大模型上不逐节点刷新 target(只在根取一次 hidden),避免 O(树节点) 次 target 前向
-    gen = Eagle1Generator(target, cfg, draft_topk_fn,
-                          refresh_target_each_node=False)
+    gen = Eagle1Generator(target, cfg, draft_topk_fn, refresh_target_each_node=False)
 
     # 输入(instruct 模型套 chat template,否则 OOD)
     if not args.no_chat_template and getattr(tok, "chat_template", None):
@@ -130,8 +127,7 @@ def main() -> None:
             device
         )
     else:
-        input_ids = tok(args.prompt, return_tensors="pt")[
-            "input_ids"].to(device)
+        input_ids = tok(args.prompt, return_tensors="pt")["input_ids"].to(device)
     plen = int(input_ids.shape[1])
     eos = tok.eos_token_id
 
@@ -194,11 +190,9 @@ def main() -> None:
     print("\n==================== EAGLE1 ====================")
     print(rec, end="")
     print(
-        "[greedy]", tok.decode(torch.tensor(
-            greedy_cont[:m]), skip_special_tokens=True)
+        "[greedy]", tok.decode(torch.tensor(greedy_cont[:m]), skip_special_tokens=True)
     )
-    print("[eagle1]", tok.decode(torch.tensor(
-        spec_cont[:m]), skip_special_tokens=True))
+    print("[eagle1]", tok.decode(torch.tensor(spec_cont[:m]), skip_special_tokens=True))
     print("================================================")
 
     with open(args.perf_log, "a") as f:

@@ -97,8 +97,7 @@ def expand_draft_tree(
     root_parent_token_id: torch.LongTensor,
     draft_topk_fn: DraftTopkFn,
     *,
-    target_hidden_refresh: Optional[Callable[[
-        torch.LongTensor], torch.Tensor]] = None,
+    target_hidden_refresh: Optional[Callable[[torch.LongTensor], torch.Tensor]] = None,
     initial_prefix_ids: Optional[torch.LongTensor] = None,
 ) -> TreeDraftResult:
     """
@@ -264,8 +263,7 @@ def expand_draft_tree_topk(
     root_parent_token_id: torch.LongTensor,
     draft_topk_fn: DraftTopkFn,
     *,
-    target_hidden_refresh: Optional[Callable[[
-        torch.LongTensor], torch.Tensor]] = None,
+    target_hidden_refresh: Optional[Callable[[torch.LongTensor], torch.Tensor]] = None,
     initial_prefix_ids: Optional[torch.LongTensor] = None,
 ) -> TreeDraftResult:
     """
@@ -320,8 +318,7 @@ def expand_draft_tree_topk(
         for node in frontier:
             if node_depth[node.tree_idx] >= cfg.num_steps:
                 continue
-            tid = torch.tensor([[node.path[-1]]],
-                               device=device, dtype=torch.long)
+            tid = torch.tensor([[node.path[-1]]], device=device, dtype=torch.long)
             child_ids, child_scores = draft_topk_fn(node.hidden, tid)
             ctoks, clps = _topk_log_probs(child_ids, child_scores, K)
             for t, dlp in zip(ctoks, clps):

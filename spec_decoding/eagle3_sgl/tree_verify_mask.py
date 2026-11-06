@@ -75,8 +75,7 @@ def layout_tree_position_ids(
 
     同一 BFS 层的节点 position 相同(树注意力按深度而非 BFS 下标计 RoPE)。
     """
-    depths = [node_depth_from_root(layout.parent, i)
-              for i in range(len(layout))]
+    depths = [node_depth_from_root(layout.parent, i) for i in range(len(layout))]
     return torch.tensor(depths, dtype=torch.long) + int(past_len)
 
 

@@ -211,8 +211,7 @@ def _run_mtbench_conversations(
     for qi, q in enumerate(questions):
         qid = q.get("question_id", qi)
         turns = q["turns"]
-        print(
-            f"[mtbench] question {qi + 1}/{len(questions)} id={qid}", flush=True)
+        print(f"[mtbench] question {qi + 1}/{len(questions)} id={qid}", flush=True)
 
         messages = list(base_messages)
         for ti, user_text in enumerate(turns[:2]):
@@ -265,8 +264,7 @@ def _format_report(
 ) -> str:
     spec_tps = stats.spec.completion_tokens / max(stats.spec.wall_s, 1e-9)
     accept_len = stats.spec.completion_tokens / max(stats.spec.spec_rounds, 1)
-    base_tps = stats.baseline.completion_tokens / \
-        max(stats.baseline.wall_s, 1e-9)
+    base_tps = stats.baseline.completion_tokens / max(stats.baseline.wall_s, 1e-9)
     speedup = spec_tps / base_tps if stats.baseline.wall_s > 0 else 0.0
 
     lines = [
@@ -291,8 +289,7 @@ def _format_report(
 def main() -> None:
     p = argparse.ArgumentParser(description="MT-Bench throughput for EAGLE3")
     p.add_argument("--target", default="meta-llama/Llama-3.1-8B-Instruct")
-    p.add_argument("--eagle3-draft",
-                   default="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")
+    p.add_argument("--eagle3-draft", default="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")
     p.add_argument("--question-file", type=Path, default=_DEFAULT_QUESTIONS)
     p.add_argument("--num-questions", type=int, default=80)
     p.add_argument(
@@ -327,16 +324,14 @@ def main() -> None:
         action="store_true",
         help="只跑 speculative,跳过 HF greedy baseline",
     )
-    p.add_argument("--spec-only", action="store_true",
-                   help=argparse.SUPPRESS)  # alias
+    p.add_argument("--spec-only", action="store_true", help=argparse.SUPPRESS)  # alias
     p.add_argument("--perf-log", type=Path, default=_HERE / "perf-mtbench.log")
     args = p.parse_args()
     if args.spec_only:
         args.skip_baseline = True
 
     device = torch.device(
-        args.device if (torch.cuda.is_available()
-                        or args.device == "cpu") else "cpu"
+        args.device if (torch.cuda.is_available() or args.device == "cpu") else "cpu"
     )
     dtype = {
         "float16": torch.float16,

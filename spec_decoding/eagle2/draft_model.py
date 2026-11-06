@@ -28,8 +28,7 @@ def _unwrap(m: Union[PreTrainedModel, nn.Module]) -> PreTrainedModel:
     inner = getattr(m, "model", None)
     if inner is not None and isinstance(inner, PreTrainedModel):
         return inner
-    raise TypeError(
-        "target must be HF PreTrainedModel or BaseModelForCausalLM")
+    raise TypeError("target must be HF PreTrainedModel or BaseModelForCausalLM")
 
 
 class _RMSNorm(nn.Module):
@@ -43,8 +42,7 @@ class _RMSNorm(nn.Module):
         # 用 fp32 计算 rms 以保证数值稳定.
         dt = x.dtype
         x = x.float()
-        x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) +
-                            self.eps)  # x / rms(x)
+        x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)  # x / rms(x)
         return (x.to(dt)) * self.weight
 
 
@@ -89,8 +87,7 @@ class _DraftDecoderLayer(nn.Module):
         self.skip_input_layernorm = skip_input_layernorm
         # 第 0 层跳过 input_layernorm(官方 EAGLE:首层输入已是 fc 融合特征,无需再归一化)
         self.input_layernorm = (
-            (lambda x: x) if skip_input_layernorm else _RMSNorm(
-                hidden, eps=eps, **fk)
+            (lambda x: x) if skip_input_layernorm else _RMSNorm(hidden, eps=eps, **fk)
         )
         self.post_attention_layernorm = _RMSNorm(hidden, eps=eps, **fk)
         # 自注意力投影;q/o 输出 H,k/v 输出 kv_dim(GQA).q/k/v bias 由 qkv_bias 控制(Qwen2 用).
@@ -106,12 +103,9 @@ class _DraftDecoderLayer(nn.Module):
     def _attn(self, x: torch.Tensor) -> torch.Tensor:
         """(GQA)多头因果自注意力.draft 通常只喂 1 个 token(S=1),此处仍按通用因果实现."""
         b, s, h = x.shape
-        q = self.q_proj(x).view(b, s, self.n_heads,
-                                self.head_dim).transpose(1, 2)
-        k = self.k_proj(x).view(b, s, self.n_kv_heads,
-                                self.head_dim).transpose(1, 2)
-        v = self.v_proj(x).view(b, s, self.n_kv_heads,
-                                self.head_dim).transpose(1, 2)
+        q = self.q_proj(x).view(b, s, self.n_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(x).view(b, s, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(x).view(b, s, self.n_kv_heads, self.head_dim).transpose(1, 2)
         # 因果 SDPA;无 rotary(decode阶段单 token 位置无影响)
         o = _sdpa_gqa(q, k, v, self.n_heads, self.n_kv_heads)
         o = o.transpose(1, 2).contiguous().view(b, s, h)  # 合并头 -> [B,S,H]
@@ -154,8 +148,7 @@ class Eagle2DraftModel(nn.Module):
         tm = _unwrap(target)
         cfg = tm.config
         hidden = int(cfg.hidden_size)
-        n_heads = int(
-            getattr(cfg, "num_attention_heads", max(1, hidden // 64)))
+        n_heads = int(getattr(cfg, "num_attention_heads", max(1, hidden // 64)))
         n_kv_heads = int(getattr(cfg, "num_key_value_heads", n_heads))
         intermediate = int(getattr(cfg, "intermediate_size", 4 * hidden))
         eps = float(getattr(cfg, "rms_norm_eps", 1e-6))
@@ -202,8 +195,7 @@ class Eagle2DraftModel(nn.Module):
             ]
         )
         # 进 lm_head 前的最终归一化
-        self.norm = _RMSNorm(hidden, eps=eps, **
-                             fk) if use_final_norm else (lambda x: x)
+        self.norm = _RMSNorm(hidden, eps=eps, **fk) if use_final_norm else (lambda x: x)
         self.hidden = hidden
 
     @property
@@ -296,8 +288,7 @@ def _read_state_dict(path: str) -> dict:
             sd.update(load_file(f))
         else:
             obj = torch.load(f, map_location="cpu", weights_only=True)
-            sd.update(obj.get("state_dict", obj)
-                      if isinstance(obj, dict) else obj)
+            sd.update(obj.get("state_dict", obj) if isinstance(obj, dict) else obj)
     return sd
 
 
@@ -308,7 +299,7 @@ def _translate_eagle_name(name: str) -> str:
     fc.weight / layers.0.post_attention_layernorm.weight 保持不变。对本模块自存的 sd 是幂等的。
     """
     if name.startswith("model."):
-        name = name[len("model."):]
+        name = name[len("model.") :]
     return name.replace("self_attn.", "").replace("mlp.", "")
 
 

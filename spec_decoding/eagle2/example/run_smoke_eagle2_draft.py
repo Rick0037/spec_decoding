@@ -25,8 +25,7 @@ from spec_decoding.eagle2 import (
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(
-        description="EAGLE2 lightweight-draft tiny smoke")
+    p = argparse.ArgumentParser(description="EAGLE2 lightweight-draft tiny smoke")
     p.add_argument("--model", default="sshleifer/tiny-gpt2")
     p.add_argument("--max-new-tokens", type=int, default=6)
     p.add_argument("--topk", type=int, default=2)
@@ -40,8 +39,7 @@ def main() -> None:
     target = GPT2LMHeadModel.from_pretrained(args.model).to(device).eval()
 
     # lightweight EAGLE draft reusing target embedding / lm_head
-    draft = build_eagle2_draft(
-        target, num_layers=args.num_layers, device=device)
+    draft = build_eagle2_draft(target, num_layers=args.num_layers, device=device)
     draft_topk_fn = make_eagle2_draft_topk_fn(draft, topk=args.topk)
 
     cfg = Eagle2TreeConfig(

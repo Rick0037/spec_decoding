@@ -55,8 +55,7 @@ def _load_target(target_id: str, device, dtype):
 def main() -> None:
     p = argparse.ArgumentParser(description="Real EAGLE3 on Llama-3.1-8B")
     p.add_argument("--target", default="meta-llama/Llama-3.1-8B-Instruct")
-    p.add_argument("--eagle3-draft",
-                   default="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")
+    p.add_argument("--eagle3-draft", default="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")
     p.add_argument(
         "--prompt", default="Explain what speculative decoding is, in two sentences."
     )
@@ -97,8 +96,7 @@ def main() -> None:
     args = p.parse_args()
 
     device = torch.device(
-        args.device if (torch.cuda.is_available()
-                        or args.device == "cpu") else "cpu"
+        args.device if (torch.cuda.is_available() or args.device == "cpu") else "cpu"
     )
     dtype = {
         "float16": torch.float16,
@@ -170,8 +168,7 @@ def main() -> None:
             device
         )
     else:
-        input_ids = tok(args.prompt, return_tensors="pt")[
-            "input_ids"].to(device)
+        input_ids = tok(args.prompt, return_tensors="pt")["input_ids"].to(device)
     plen = int(input_ids.shape[1])
     eos = tok.eos_token_id
 
@@ -234,8 +231,7 @@ def main() -> None:
     print("\n==================== EAGLE3 ====================")
     print(rec, end="")
     print(
-        "[greedy]", tok.decode(torch.tensor(
-            greedy_cont[:m]), skip_special_tokens=True)
+        "[greedy]", tok.decode(torch.tensor(greedy_cont[:m]), skip_special_tokens=True)
     )
     print(
         "[eagle3_sgl]",

@@ -59,8 +59,7 @@ def _unwrap(m: Union[PreTrainedModel, nn.Module]) -> PreTrainedModel:
     inner = getattr(m, "model", None)
     if inner is not None and isinstance(inner, PreTrainedModel):
         return inner
-    raise TypeError(
-        "target must be HF PreTrainedModel or BaseModelForCausalLM")
+    raise TypeError("target must be HF PreTrainedModel or BaseModelForCausalLM")
 
 
 def _num_hidden_layers(m: Union[PreTrainedModel, nn.Module]) -> int:
@@ -140,8 +139,7 @@ def _verify_path_clean(
     P = int(full_prefix_ids.shape[1])
     # 整段 [prefix | path] 一次 forward;不写入 runner 的 past(use_cache=False)
     full = torch.cat(
-        [full_prefix_ids, torch.tensor(
-            [path_tokens], device=device, dtype=torch.long)],
+        [full_prefix_ids, torch.tensor([path_tokens], device=device, dtype=torch.long)],
         dim=1,
     )
     logits = target_m(
@@ -160,8 +158,7 @@ def _verify_path_clean(
             corr = g
             break
     if mlen == len(path_tokens):
-        nxt = int(logits[P - 1 + len(path_tokens)
-                         ].argmax(dim=-1).item())  # bonus
+        nxt = int(logits[P - 1 + len(path_tokens)].argmax(dim=-1).item())  # bonus
     else:
         nxt = int(corr)
     return mlen, nxt
@@ -219,14 +216,13 @@ class Eagle3SglGenerator:
         self.autoregressive_draft = autoregressive_draft
         self.refresh_target_each_node = refresh_target_each_node
         if autoregressive_draft and draft_model is None:
-            raise ValueError(
-                "autoregressive_draft=True requires draft_model=...")
+            raise ValueError("autoregressive_draft=True requires draft_model=...")
         if not autoregressive_draft and draft_topk_fn is None:
-            raise ValueError(
-                "autoregressive_draft=False requires draft_topk_fn")
+            raise ValueError("autoregressive_draft=False requires draft_topk_fn")
         # EAGLE3 多层特征下标(draft 条件来自这些层的末 token hidden 拼接)
         self.eagle_layers: List[int] = cfg.resolve_eagle_layers(
-            _num_hidden_layers(target))
+            _num_hidden_layers(target)
+        )
         # 诊断计数:投机采样的轮数,采纳 的token 数(accept/round = n_accepted_tokens / n_rounds)
         self.n_rounds = 0
         self.n_accepted_tokens = 0
@@ -351,7 +347,9 @@ class Eagle3SglGenerator:
         root_acts: Optional[torch.Tensor] = None,
         acts_all: Optional[torch.Tensor] = None,
         draft_state: Optional[_DraftKvState] = None,
-    ) -> Tuple[Optional[torch.LongTensor], TreeVerifyLayout, torch.Tensor, TreeDraftResult]:
+    ) -> Tuple[
+        Optional[torch.LongTensor], TreeVerifyLayout, torch.Tensor, TreeDraftResult
+    ]:
         """
         单轮投机返回 (append_chunk, layout, attn_bias_2d, draft_result)。
 
@@ -395,22 +393,26 @@ class Eagle3SglGenerator:
         leaves = _leaf_indices(draft_res.parent)
         # 退化:树只有空或无叶节点时,等价于投机解码失败,直接 target生成下一 token
         if not leaves:
-            _, nxt = _verify_path_clean(
-                self.target_m, full_prefix_ids, [], device)
-            bias = build_tree_sdpa_attn_bias(
-                layout, device=device, dtype=torch.float32)
-            return torch.tensor([[nxt]], device=device, dtype=torch.long), layout, bias, draft_res
+            _, nxt = _verify_path_clean(self.target_m, full_prefix_ids, [], device)
+            bias = build_tree_sdpa_attn_bias(layout, device=device, dtype=torch.float32)
+            return (
+                torch.tensor([[nxt]], device=device, dtype=torch.long),
+                layout,
+                bias,
+                draft_res,
+            )
         if self.cfg.verify_mode == "full_model_tree":
             if recovery_logits is None:
-                raise ValueError(
-                    "full_model_tree verify requires recovery_logits")
+                raise ValueError("full_model_tree verify requires recovery_logits")
             # 复用前缀 KV 的 extend verify(只前向 L 个树节点,不重算前缀);
             # backend=triton_tree(或 auto+topk>1+triton 可用)→ Triton 树注意力 kernel;否则走HF自带的torch sdpa.
             backend = self.cfg.verify_attn_backend
             use_triton = backend == "triton_tree" or (
                 backend == "auto" and self.cfg.topk > 1 and triton_extend_available()
             )
-            verify_fn = full_tree_verify_triton if use_triton else full_tree_verify_extend
+            verify_fn = (
+                full_tree_verify_triton if use_triton else full_tree_verify_extend
+            )
             append_list, _, _, _ = verify_fn(
                 self.target_m,
                 layout,
@@ -422,8 +424,7 @@ class Eagle3SglGenerator:
                 leaves=leaves,
                 device=device,
             )
-            append = torch.tensor(
-                [append_list], device=device, dtype=torch.long)
+            append = torch.tensor([append_list], device=device, dtype=torch.long)
             cross_bias = build_tree_cross_attn_bias_with_prefix(
                 layout, past_len, device=device, dtype=torch.float32
             )
@@ -433,23 +434,21 @@ class Eagle3SglGenerator:
             raise ValueError(f"unhandled verify_mode={self.cfg.verify_mode!r}")
 
         # reference_paths:每条叶路径一次完整 causal forward(串行verify),选 match 最长的叶(慢,易对照)
-        bias = build_tree_sdpa_attn_bias(
-            layout, device=device, dtype=torch.float32)
+        bias = build_tree_sdpa_attn_bias(layout, device=device, dtype=torch.float32)
         best_m = -1
         best_li = 10**9
         best_next = 0
         best_leaf = 0
         for li, leaf in enumerate(leaves):
-            path = _path_tokens_to_leaf(
-                draft_res.parent, draft_res.token_ids, leaf)
-            mlen, nxt = _verify_path_clean(
-                self.target_m, full_prefix_ids, path, device)
+            path = _path_tokens_to_leaf(draft_res.parent, draft_res.token_ids, leaf)
+            mlen, nxt = _verify_path_clean(self.target_m, full_prefix_ids, path, device)
             # 平局:leaf 下标更小者优先(与 extend verify 的 tie-break 一致)
             if mlen > best_m or (mlen == best_m and li < best_li):
                 best_m, best_li, best_next, best_leaf = mlen, li, nxt, leaf
 
         path = _path_tokens_to_leaf(
-            draft_res.parent, draft_res.token_ids, int(best_leaf))
+            draft_res.parent, draft_res.token_ids, int(best_leaf)
+        )
         # 全中:采纳整条 path + bonus;否则采纳 path[:m] + target 纠正的下一 token
         if best_m == len(path):
             append_list = path + [best_next]
@@ -512,8 +511,7 @@ class Eagle3SglGenerator:
         draft_state: Optional[_DraftKvState] = None
         if self.autoregressive_draft:
             # ③ Draft 与 prefix 对齐的整段 prefill(EAGLE shift 在 draft_model.prefill 内)
-            d_logits, d_hidden, d_kv = self.draft_model.prefill(
-                out_ids, acts_all)
+            d_logits, d_hidden, d_kv = self.draft_model.prefill(out_ids, acts_all)
             draft_state = _DraftKvState(
                 kv=d_kv,
                 prefix_len=int(out_ids.shape[1]),
@@ -557,9 +555,12 @@ class Eagle3SglGenerator:
                 p_old = draft_state.prefix_len
                 p_new = int(out_ids.shape[1]) + int(append.shape[1])
                 # acts_all[:, t] 是 target 在位置 t 的多层 act;draft 在位置 t 消费 target生成的acts[:, t-1]
-                ext_acts = acts_all[:, p_old - 1: p_new - 1, :]
+                ext_acts = acts_all[:, p_old - 1 : p_new - 1, :]
                 d_logits, d_hidden, d_kv = self.draft_model.extend_tokens(
-                    append, ext_acts, draft_state.kv, p_old - 1  # RoPE 从旧 prefix 末位置续
+                    append,
+                    ext_acts,
+                    draft_state.kv,
+                    p_old - 1,  # RoPE 从旧 prefix 末位置续
                 )
                 draft_state = _DraftKvState(
                     kv=d_kv,
@@ -595,7 +596,9 @@ def make_hidden_residual_draft_topk_fn(
 
     dm = _unwrap(draft_model)
 
-    def fn(hidden: torch.Tensor, parent_token_id: torch.LongTensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def fn(
+        hidden: torch.Tensor, parent_token_id: torch.LongTensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         emb = dm.get_input_embeddings()(parent_token_id)
         if emb.shape[-1] != proj.out_features:
             raise ValueError(

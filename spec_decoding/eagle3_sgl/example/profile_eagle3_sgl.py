@@ -28,9 +28,7 @@ import argparse
 import json
 import os
 
-os.environ.setdefault(
-    "EAGLE3_PROFILE", "1"
-)  # 必须在 import runner 前(若 runner 支持)
+os.environ.setdefault("EAGLE3_PROFILE", "1")  # 必须在 import runner 前(若 runner 支持)
 
 
 def _load_target(target_id: str, device, dtype):
@@ -76,16 +74,14 @@ def _stage_table(prof) -> str:
         out.append(
             f"{key:<28}{cnt:>8}{dev_us / 1e3:>12.2f}{100 * dev_us / total_dev:>7.1f}%{cpu_us / 1e3:>12.2f}"
         )
-    out.append(
-        f"{'(stage total)':<28}{'':>8}{total_dev / 1e3:>12.2f}{100.0:>7.1f}%")
+    out.append(f"{'(stage total)':<28}{'':>8}{total_dev / 1e3:>12.2f}{100.0:>7.1f}%")
     return "\n".join(out)
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description="torch.profiler for EAGLE3")
     p.add_argument("--target", default="meta-llama/Llama-3.1-8B-Instruct")
-    p.add_argument("--eagle3-draft",
-                   default="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")
+    p.add_argument("--eagle3-draft", default="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")
     p.add_argument(
         "--prompt", default="Explain what speculative decoding is, in two sentences."
     )
@@ -118,8 +114,7 @@ def main() -> None:
     args = p.parse_args()
 
     device = torch.device(
-        args.device if (torch.cuda.is_available()
-                        or args.device == "cpu") else "cpu"
+        args.device if (torch.cuda.is_available() or args.device == "cpu") else "cpu"
     )
     dtype = {
         "float16": torch.float16,
@@ -194,15 +189,13 @@ def main() -> None:
             ids = out
         input_ids = ids.to(device)
     else:
-        input_ids = tok(args.prompt, return_tensors="pt")[
-            "input_ids"].to(device)
+        input_ids = tok(args.prompt, return_tensors="pt")["input_ids"].to(device)
     eos = tok.eos_token_id
 
     # 预热(含 CUDA graph / kernel autotune / 编译缓存),不计入 profile
     print("[profile] warmup ...", flush=True)
     with torch.inference_mode():
-        gen.generate(input_ids, max_new_tokens=args.warmup_tokens,
-                     eos_token_id=eos)
+        gen.generate(input_ids, max_new_tokens=args.warmup_tokens, eos_token_id=eos)
     gen.n_rounds = 0
     gen.n_accepted_tokens = 0
     if torch.cuda.is_available():

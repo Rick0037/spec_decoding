@@ -28,8 +28,7 @@ import torch
 def main() -> None:
     p = argparse.ArgumentParser(description="Real EAGLE-1 on Qwen2.5-32B")
     p.add_argument("--target", default="Qwen/Qwen2.5-32B-Instruct")
-    p.add_argument("--eagle1-draft",
-                   default="mit-han-lab/Qwen2.5-32B-Eagle-RL")
+    p.add_argument("--eagle1-draft", default="mit-han-lab/Qwen2.5-32B-Eagle-RL")
     p.add_argument(
         "--prompt", default="Explain what speculative decoding is, in two sentences."
     )
@@ -56,8 +55,7 @@ def main() -> None:
     args = p.parse_args()
 
     device = torch.device(
-        args.device if (torch.cuda.is_available()
-                        or args.device == "cpu") else "cpu"
+        args.device if (torch.cuda.is_available() or args.device == "cpu") else "cpu"
     )
     dtype = {
         "float16": torch.float16,
@@ -98,8 +96,7 @@ def main() -> None:
         verify_mode=args.verify_mode,
         verify_attn_backend=args.verify_attn_backend,
     )
-    gen = Eagle1Generator(target, cfg, draft_topk_fn,
-                          refresh_target_each_node=False)
+    gen = Eagle1Generator(target, cfg, draft_topk_fn, refresh_target_each_node=False)
 
     if not args.no_chat_template and getattr(tok, "chat_template", None):
         out = tok.apply_chat_template(
@@ -111,8 +108,7 @@ def main() -> None:
             device
         )
     else:
-        input_ids = tok(args.prompt, return_tensors="pt")[
-            "input_ids"].to(device)
+        input_ids = tok(args.prompt, return_tensors="pt")["input_ids"].to(device)
     plen = int(input_ids.shape[1])
     eos = tok.eos_token_id
 
@@ -199,8 +195,7 @@ def main() -> None:
         f.write(time.strftime("%Y-%m-%d %H:%M:%S\n"))
         f.write(rec)
         f.write("\n")
-    print(
-        f"[eagle1-qwen-e2e] perf appended to {os.path.abspath(args.perf_log)}")
+    print(f"[eagle1-qwen-e2e] perf appended to {os.path.abspath(args.perf_log)}")
     if lossless:
         print("[eagle1-qwen-e2e] OK (lossless vs HF standard greedy)")
     else:

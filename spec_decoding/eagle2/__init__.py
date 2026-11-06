@@ -8,7 +8,7 @@ spec_decoding.eagle2 —— 完整 EAGLE2 思想(相对链式 greedy 的三块�
 EAGLE2 在工程上相对draft 只猜一条链多出什么？
 --------------------------------------------------------------------
 
-1. Target 条件 Draft(hidden)  
+1. Target 条件 Draft(hidden)
    小模型不只吃 token id,还吃 大模型在当前前缀末 token 上的某层 hidden
    (常见取最后一层、进 lm_head 之前),使 draft 与 target 表征空间对齐。
    实现入口:hidden.forward_target_last_hidden;draft 侧两种接法:
@@ -16,11 +16,11 @@ EAGLE2 在工程上相对draft 只猜一条链多出什么？
        (复用 target embedding/lm_head + fc(2H→H) + 1 层 decoder,首层跳过 input_layernorm);
      - runner.make_hidden_residual_draft_topk_fn:用外部完整模型 + proj(emb + proj(h))。
 
-2. Top-k > 1 → 树形候选  
+2. Top-k > 1 → 树形候选
    每一步 draft 输出多个子 token,形成 树 而非单链;一步可并行探索多条
    延续。实现入口:tree_draft.expand_draft_tree_topk、Eagle2TreeConfig.topk。
 
-3. 专用 Verify Attention(树掩码)  
+3. 专用 Verify Attention(树掩码)
    若把整棵树摊成一次 target forward 里的多个 query 位置,标准 三角因果掩码
    不够:兄弟分支会互相看见,未选中路径的信息会泄漏进 logits。EAGLE2
    要求位置 i 只能 attend 自己到根路径上的祖先(外加 KV cache 里的前缀)。
@@ -59,6 +59,7 @@ from .tree_verify_mask import (
     build_tree_cross_attn_bias_with_prefix,
     build_tree_sdpa_attn_bias,
 )
+
 __all__ = [
     "Eagle2TreeConfig",
     "Eagle2Generator",
@@ -118,7 +119,11 @@ def __getattr__(name: str) -> Any:
         from .tree_verify_full import select_append_from_full_tree_logits
 
         return select_append_from_full_tree_logits
-    if name in ("resolve_verify_attn_backend", "flash_attn_available", "triton_extend_available"):
+    if name in (
+        "resolve_verify_attn_backend",
+        "flash_attn_available",
+        "triton_extend_available",
+    ):
         from . import tree_verify_attn as tva
 
         return getattr(tva, name)

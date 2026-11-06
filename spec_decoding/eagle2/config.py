@@ -60,8 +60,7 @@ class Eagle2TreeConfig:
             "full_model_tree",
             "reference_paths",
         ):
-            raise ValueError(
-                "verify_mode must be full_model_tree or reference_paths")
+            raise ValueError("verify_mode must be full_model_tree or reference_paths")
         if self.verify_attn_backend not in (
             "auto",
             "eager",

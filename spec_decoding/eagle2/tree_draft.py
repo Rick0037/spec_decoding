@@ -125,8 +125,7 @@ def expand_draft_tree_topk(
     root_parent_token_id: torch.LongTensor,
     draft_topk_fn: DraftTopkFn,
     *,
-    target_hidden_refresh: Optional[Callable[[
-        torch.LongTensor], torch.Tensor]] = None,
+    target_hidden_refresh: Optional[Callable[[torch.LongTensor], torch.Tensor]] = None,
     initial_prefix_ids: Optional[torch.LongTensor] = None,
 ) -> TreeDraftResult:
     """
@@ -192,8 +191,7 @@ def expand_draft_tree_topk(
         for node in frontier:
             if node_depth[node.tree_idx] >= cfg.num_steps:
                 continue  # 已达最大深度,不再扩展
-            tid = torch.tensor([[node.path[-1]]],
-                               device=device, dtype=torch.long)
+            tid = torch.tensor([[node.path[-1]]], device=device, dtype=torch.long)
             # draft forward,得到每个topk node的子节点logits
             child_ids, child_scores = draft_topk_fn(node.hidden, tid)
             ctoks, clps = _topk_log_probs(child_ids, child_scores, K)
@@ -243,13 +241,11 @@ def expand_draft_tree_bfs(
     root_parent_token_id: torch.LongTensor,
     draft_topk_fn: DraftTopkFn,
     *,
-    target_hidden_refresh: Optional[Callable[[
-        torch.LongTensor], torch.Tensor]] = None,
+    target_hidden_refresh: Optional[Callable[[torch.LongTensor], torch.Tensor]] = None,
     initial_prefix_ids: Optional[torch.LongTensor] = None,
 ) -> TreeDraftResult:
     """无累计剪枝的 BFS 展开(对照 / 调试, eagle1版本)."""
-    K = min(cfg.topk, cfg.max_tree_nodes -
-            1) if cfg.max_tree_nodes > 0 else cfg.topk
+    K = min(cfg.topk, cfg.max_tree_nodes - 1) if cfg.max_tree_nodes > 0 else cfg.topk
     if K < 1:
         raise ValueError("topk or max_tree_nodes invalid")
 
@@ -281,8 +277,7 @@ def expand_draft_tree_bfs(
         pidx, d, _ptok, ph, path_p, p_lp = q.popleft()
         if d >= cfg.num_steps:
             continue
-        tid = torch.tensor(
-            [[path_p[-1]]], device=root_hidden.device, dtype=torch.long)
+        tid = torch.tensor([[path_p[-1]]], device=root_hidden.device, dtype=torch.long)
         h = _expand_hidden(
             ph,
             path_p,
