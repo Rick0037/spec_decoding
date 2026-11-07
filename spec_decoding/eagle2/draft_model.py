@@ -334,8 +334,9 @@ def load_eagle2_draft_weights(
 def make_eagle2_draft_topk_fn(draft_model: Eagle2DraftModel, topk: int):
     """工厂:把 Eagle2DraftModel 包成 tree_draft.DraftTopkFn。
 
-    返回 (topk_ids, topk_log_probs):分数是 log_softmax 后的值,便于 eagle2 树展开里
-    把每步分数当 log 概率累加做 beam / 剪枝。
+    * [EAGLE2 新增 vs EAGLE1] 返回 (topk_ids, topk_log_probs):分数是 log_softmax 后的值,便于 eagle2 树展开里
+    把每步分数当 log 概率累加做 beam / 剪枝。EAGLE1 的 make_eagle1_draft_topk_fn 返回原始 logits
+    (静态树不依赖分数),draft 网络本身两者完全一致、checkpoint 通用。
     """
 
     @torch.inference_mode()
@@ -344,6 +345,7 @@ def make_eagle2_draft_topk_fn(draft_model: Eagle2DraftModel, topk: int):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         logits = draft_model(parent_token_id, hidden)  # [B, vocab]
         k = min(topk, logits.shape[-1])
+        # * log_softmax = log(softmax(z))
         log_probs = torch.log_softmax(logits.float(), dim=-1)
         lp, idx = torch.topk(log_probs, k=k, dim=-1)
         return idx, lp.to(logits.dtype)

@@ -405,8 +405,14 @@ class Eagle3SglGenerator:
             # 复用前缀 KV 的 extend verify(只前向 L 个树节点,不重算前缀);
             # backend=triton_tree(或 auto+topk>1+triton 可用)→ Triton 树注意力 kernel;否则走HF自带的torch sdpa.
             backend = self.cfg.verify_attn_backend
+            # auto 选 triton 还需 target 真在 GPU 上:triton_extend_available 只看
+            # 机器有无 CUDA,不看张量设备,CPU 模型会误入 triton 路径。
+            target_on_cuda = next(self.target_m.parameters()).device.type == "cuda"
             use_triton = backend == "triton_tree" or (
-                backend == "auto" and self.cfg.topk > 1 and triton_extend_available()
+                backend == "auto"
+                and self.cfg.topk > 1
+                and target_on_cuda
+                and triton_extend_available()
             )
             verify_fn = (
                 full_tree_verify_triton if use_triton else full_tree_verify_extend

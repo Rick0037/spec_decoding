@@ -238,6 +238,7 @@ class Eagle2Generator:
         # 大模型上 refresh=None 只用根 hidden(建树仅跑 draft),避免每节点重复 target forward.
         _refresh = refresh if self.refresh_target_each_node else None
         _init_prefix = full_prefix_ids if self.refresh_target_each_node else None
+        # * [EAGLE2 新增 vs EAGLE1] 建树分发:EAGLE1 只有静态 BFS 一种;这里按 tree_expand_mode 选
         if self.cfg.tree_expand_mode == "bfs":  # eagle1 风格,直接求整棵树的topk
             draft_res = expand_draft_tree_bfs(
                 self.cfg,
@@ -276,8 +277,14 @@ class Eagle2Generator:
             # 复用前缀 KV 的 extend verify(只前向 L 个树节点,不重算前缀);正确 parent→child 接受.
             # backend=triton_tree(或 auto+topk>1+triton 可用;否则 HF sdpa.
             backend = self.cfg.verify_attn_backend
+            # auto 选 triton 还需 target 真在 GPU 上:triton_extend_available 只看
+            # 机器有无 CUDA,不看张量设备,CPU 模型会误入 triton 路径。
+            target_on_cuda = next(self.target_m.parameters()).device.type == "cuda"
             use_triton = backend == "triton_tree" or (
-                backend == "auto" and self.cfg.topk > 1 and triton_extend_available()
+                backend == "auto"
+                and self.cfg.topk > 1
+                and target_on_cuda
+                and triton_extend_available()
             )
             verify_fn = (
                 full_tree_verify_triton if use_triton else full_tree_verify_extend

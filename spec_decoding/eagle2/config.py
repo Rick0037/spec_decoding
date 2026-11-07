@@ -28,7 +28,7 @@ class Eagle2TreeConfig:
     max_tree_nodes: int = 32
     """剪枝后保留的 draft 节点上限(对齐官方 total_tokens 量级)。"""
     tree_expand_mode: str = "cumulative"
-    """
+    """* [EAGLE2 新增 vs EAGLE1] 树展开策略开关(EAGLE1 无此字段,恒为静态树):
     cumulative:EAGLE-2 累计 log 概率 beam + 全局按分剪枝(默认)。
     bfs:仅 BFS 展开、不做 beam 剪枝(调试对照)。
     """
