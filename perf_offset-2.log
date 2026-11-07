@@ -1,0 +1,6 @@
+2026-11-07 13:13:34
+[eagle1] target=/root/autodl-tmp/code/LlmQT/Llama-2-7b-ms draft=yuhuili/EAGLE-llama2-chat-7B verify=full_model_tree(backend=auto) topk=4 num_steps=4 max_nodes=24 dtype=float16
+  new_tokens=64  rounds=41  accept/round=1.56
+  wall=3.82s  spec_tok/s=16.76  lossless=True
+  baseline(HF greedy) new_tokens=64  wall=1.25s  base_tok/s=51.25  speedup=0.33x
+

@@ -1,15 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-End-to-end EAGLE1 on a Llama-series target with the lightweight EAGLE1 draft
-(reuse target embedding/lm_head + 1 decoder layer, skip layer-0 input_layernorm)
-and a static top-k tree.
+Llama 系列 target + 轻量 EAGLE1 draft(复用 target 的 embedding/lm_head + 1 层
+decoder,首层跳过 input_layernorm)与静态 top-k 树的端到端测试.
 
-The draft is randomly initialized (no trained EAGLE1 checkpoint), so accept rate is
-low — but greedy tree verify keeps the output lossless vs. plain greedy.
+draft 为随机初始化(没有训练过的 EAGLE1 checkpoint),因此接受率很低 —— 但
+greedy 树验证仍保证输出相对纯 greedy 是无损的.
 
-Gated behind an env var (downloads + GPU helpful):
+需要下载权重(建议用 GPU),用环境变量做开关:
 
-    RUN_SPEC_E2E=1 PYTHONPATH=. python3 -m unittest tests.test_eagle1_e2e_llama -v
+HF_HOME=/root/autodl-tmp/hf_cache HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+RUN_SPEC_E2E=1 PYTHONPATH=. \
+.venv/bin/python -m unittest tests.test_eagle1_e2e_llama -v
+
 """
 
 from __future__ import annotations
@@ -46,6 +48,7 @@ class TestEagle1E2ELlama(unittest.TestCase):
             .to(cls.device)
             .eval()
         )
+        # * from draft.py build draft.model
         cls.draft = build_eagle1_draft(cls.target, num_layers=1)
 
     def test_lossless_vs_greedy(self) -> None:
@@ -65,8 +68,16 @@ class TestEagle1E2ELlama(unittest.TestCase):
         base_cont = base[0, plen:]
 
         cfg = Eagle1Config(
-            topk=2, num_steps=2, max_tree_nodes=8, verify_mode="reference_paths"
+            # topk=2,
+            # num_steps=2,
+            # max_tree_nodes=8,
+            # verify_mode="reference_paths",
+            topk=2,
+            num_steps=2,
+            max_tree_nodes=8,
+            verify_mode="full_model_tree",
         )
+        # * draft function in draft.py
         fn = make_eagle1_draft_topk_fn(self.draft, topk=cfg.topk)
         gen = Eagle1Generator(self.target, cfg, fn)
         out = gen.generate(
@@ -74,6 +85,7 @@ class TestEagle1E2ELlama(unittest.TestCase):
         )
         spec_cont = out[0, plen:]
 
+        # * 对比 speculative decoding and base model res
         m = min(int(base_cont.numel()), int(spec_cont.numel()))
         self.assertGreater(m, 0)
         if not torch.equal(base_cont[:m].cpu(), spec_cont[:m].cpu()):

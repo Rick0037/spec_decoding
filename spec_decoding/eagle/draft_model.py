@@ -32,19 +32,25 @@ def _unwrap(m: Union[PreTrainedModel, nn.Module]) -> PreTrainedModel:
 
 
 class _RMSNorm(nn.Module):
-    """RMSNorm(Llama 风格)"""
+    """RMSNorm(Llama 风格)
+    layernorm(average = 0)
+    """
 
     def __init__(self, dim: int, eps: float = 1e-6, **fk) -> None:
-        # weight 初始化为 1;eps 防止除零.
+        # weight 初始化为 1 可学习的权重;eps 防止除零.
         super().__init__()
-        self.weight = nn.Parameter(torch.ones(dim, **fk))
         self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim, **fk))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # 用 fp32 计算 rms 以保证数值稳定,再转回原 dtype.
+        # * x -> [batch_size, seq_len, hidden_size]
         dt = x.dtype
         x = x.float()
-        x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)  # x / rms(x)
+        # * x.pow(2) # x^2
+        # * rsqrt = 1/sqrt(x^2)
+        x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+        # x / rms(x) = x / sqrt(x^2)
         return (x.to(dt)) * self.weight
 
 
@@ -168,9 +174,11 @@ class Eagle1DraftModel(nn.Module):
 
         embed = tm.get_input_embeddings()
         lm_head = tm.get_output_embeddings()  # tie 时为 None
-        # 复用 target 的 embedding / lm_head:用 list 持有,避免被注册为子模块而在 draft.to()
+        # 复用 target 的 embedding / lm_head:
+        # 用 list 持有,避免被注册为子模块而在 draft.to()
         # 时连带改写 target 自己的权重(参数共享但不归属本模块).
-        self._shared = [embed, lm_head]
+        self._shared_embedding_layers = [embed, lm_head]
+        # self._shared = [embed, lm_head]
 
         # 新建参数默认跟随 target 的 device/dtype
         if device is None:
@@ -204,14 +212,15 @@ class Eagle1DraftModel(nn.Module):
     @property
     def embed(self) -> nn.Module:
         """复用的 target 输入 embedding(共享权重)."""
-        return self._shared[0]
+        return self._shared_embedding_layers[0]
 
     def _lm_logits(self, x: torch.Tensor) -> torch.Tensor:
         """用复用的 lm_head 投影到词表;若 target 与 embedding tie,则用 embedding 权重."""
-        lm_head = self._shared[1]
+        lm_head = self._shared_embedding_layers[1]
         if lm_head is not None:
             return lm_head(x)
         # tied embedding:logits = x @ embed.weight^T
+        # * 如果没有lm head 可能是用了同一个了
         return F.linear(x, self.embed.weight)
 
     def forward(
@@ -223,16 +232,23 @@ class Eagle1DraftModel(nn.Module):
         emb = self.embed(token_ids)  # [B, S, H]:父 token 的词嵌入
         # 把 target hidden 对齐到 [B, S, H](draft decode时 S=1)
         if target_hidden.dim() == 2:
-            target_hidden = target_hidden.unsqueeze(1)  # [B, 1, H]
+            target_hidden = target_hidden.unsqueeze(
+                1
+            )  # [batch_size, hidden_dim] -> [batch_size, 1, hidden_dim]
         if target_hidden.shape[1] != emb.shape[1]:
             target_hidden = target_hidden.expand(-1, emb.shape[1], -1)
         # feature 融合:x = fc([emb ; target_hidden]) —— EAGLE 的核心条件化
-        x = self.fc(torch.cat([emb, target_hidden.to(emb.dtype)], dim=-1))
+        # * concat at hidden_dim
+        x = self.fc(
+            torch.cat([emb, target_hidden.to(emb.dtype)], dim=-1)
+        )  # [batch, seq_len, 2h] -> [batch, seq_len, h]
         for layer in self.layers:  # 通常 1 层,多层接受率会好些
             x = layer(x)
-        x = self.norm(x)
+        x = self.norm(x)  # [batch, seq_len, h]
         # 取最后一个位置过复用的 lm_head 得下一 token 分布
+        # * x[:, -1, :]-> [batch_size, h]
         logits = self._lm_logits(x[:, -1, :])
+        # * [batch_size, h] -> [B, vocab_size]
         return logits
 
 
@@ -337,6 +353,7 @@ def load_eagle1_draft_weights(
 def make_eagle1_draft_topk_fn(draft_model: Eagle1DraftModel, topk: int):
     """工厂:把 Eagle1DraftModel 包成 tree_draft.DraftTopkFn."""
 
+    # * [B, vocab_size]-> [B, score], [batch, token_id(词表下标就是token_id)]
     @torch.inference_mode()
     def fn(
         hidden: torch.Tensor, parent_token_id: torch.LongTensor

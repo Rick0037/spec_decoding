@@ -32,6 +32,11 @@ class TreeDraftResult:
     node_depth: List[int]
     bfs_index: List[int]
     """节点创建顺序(调试用)。"""
+    # 设 cfg.topk=2,num_steps=3,max_tree_nodes=16,前缀是 "The capital of France is",根 token = "is".
+    # token_ids = [Paris, the, ., ,, capital, city, .., .., .., .., .., .., .., ..]
+    # parent    = [ -1,  -1,  0, 0,   1,    1,   2,  2,  3,  3,  4,  4,  5,  5 ]
+    # node_depth= [  1,   1,  2, 2,   2,    2,   3,  3,  3,  3,  3,  3,  3,  3 ]
+    # bfs_index = [  0,   1,  2, 3,   4,    5,   6,  7,  8,  9, 10, 11, 12, 13 ]
 
 
 DraftTopkFn = Callable[
@@ -112,6 +117,10 @@ def expand_draft_tree(
     # root_parent_token_id = is,对其作topk spec
     # root_toks = [Paris, the]
     topk_ids, _ = draft_topk_fn(root_hidden, root_parent_token_id)
+    # import pdb
+
+    # pdb.set_trace()
+    # * 针对root 取了一次topk
     root_toks = _topk_ids(topk_ids, K)
 
     # 队列元素:(tree_idx, depth, hidden, path)
@@ -123,40 +132,42 @@ def expand_draft_tree(
     # 把paris和the这俩由prompt末端token生成的topK添加到队列
     # q=((0,1,root hidden,[Paris]),(1,1,root hidden,[the]))
     # parent=(-1,-1)
-    q: deque = deque()
-    for t in root_toks:
+    # * 层序遍历构建tree
+    que: deque = deque()
+    for token in root_toks:
         if len(token_ids) >= cfg.max_tree_nodes:
             break
         idx = len(token_ids)
-        token_ids.append(t)
+        token_ids.append(token)
         parent.append(-1)
         depth.append(1)
         bfs_ix.append(idx)
-        q.append((idx, 1, root_hidden, [t]))
+        que.append((idx, 1, root_hidden, [token]))
 
-    while q and len(token_ids) < cfg.max_tree_nodes:
-        pidx, d, ph, path_p = q.popleft()
-        if d >= cfg.num_steps:
+    while que and len(token_ids) < cfg.max_tree_nodes:
+        position_index, dep, hidden, path_p = que.popleft()
+        if dep >= cfg.num_steps:
             continue
-        h = _expand_hidden(
-            ph,
-            path_p,
-            target_hidden_refresh=target_hidden_refresh,
-            initial_prefix_ids=initial_prefix_ids,
-        )
-        tid = torch.tensor([[path_p[-1]]], device=device, dtype=torch.long)
+        # TODO by ruixuan 不要重算, 太不好了, 啥用没有了
+        # hidden = _expand_hidden(
+        #     parent_hidden,
+        #     path_p,
+        #     target_hidden_refresh=target_hidden_refresh,
+        #     initial_prefix_ids=initial_prefix_ids,
+        # )
+        token_id = torch.tensor([[path_p[-1]]], device=device, dtype=torch.long)
         # 对paris作spec K,对the作spec K
-        child_ids, _ = draft_topk_fn(h, tid)
+        child_ids, _ = draft_topk_fn(hidden, token_id)
         # 对paris和the生成的topk添加在q里,对该topk继续bfs生成下一个topk,直到超过了num steps或max tree nodes
         for ct in _topk_ids(child_ids, K):
             if len(token_ids) >= cfg.max_tree_nodes:
                 break
             cidx = len(token_ids)
             token_ids.append(ct)
-            parent.append(pidx)
-            depth.append(d + 1)
+            parent.append(position_index)
+            depth.append(dep + 1)
             bfs_ix.append(cidx)
-            q.append((cidx, d + 1, h, path_p + [ct]))
+            que.append((cidx, dep + 1, hidden, path_p + [ct]))
     # token_ids = [Paris, the, ., ,, capital, city, .., .., .., .., .., .., .., ..]
     # parent    = [ -1,  -1,  0, 0,   1,    1,   2,  2,  3,  3,  4,  4,  5,  5 ]
     # node_depth= [  1,   1,  2, 2,   2,    2,   3,  3,  3,  3,  3,  3,  3,  3 ]

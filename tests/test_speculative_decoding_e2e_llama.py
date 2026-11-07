@@ -1,21 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-End-to-end single-chain greedy speculative decode on Llama-series models.
+Llama 系列模型上的端到端单链 greedy 投机解码测试。
 
-Target/draft are real Llama-architecture checkpoints sharing the same 32k vocab:
+target / draft 都是真实的 Llama 架构权重,且共享同一个 32k 词表:
   - target: JackFram/llama-160m
-  - draft:  JackFram/llama-68m  (a classic ungated speculative-decoding pair)
+  - draft:  JackFram/llama-68m(一对经典的、无需申请的投机解码组合)
 
-Correctness check (losslessness): greedy speculative decoding must produce the
-SAME continuation as the target's plain greedy generate (the draft only changes
-*speed*, never the output under greedy verify).
+正确性检查(无损性):greedy 投机解码产出的续写必须与 target 单独 greedy
+generate 完全一致(draft 只影响速度,在 greedy verify 下永不改变输出).
 
-This test downloads weights + needs a GPU, so it is gated behind an env var to
-keep the default CPU unit-test suite fast:
+本测试需要下载权重且需要 GPU,因此用环境变量做开关,以免拖慢默认的 CPU
+单测套件:
 
-    RUN_SPEC_E2E=1 PYTHONPATH=. python3 -m unittest tests.test_speculative_decoding_e2e_llama -v
+HF_HOME=/root/autodl-tmp/hf_cache HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+RUN_SPEC_E2E=1 PYTHONPATH=. \
+SPEC_E2E_DRAFT=/root/autodl-tmp/models/llama-68m \
+.venv/bin/python -m unittest tests.test_speculative_decoding_e2e_llama -v
 
-Override models via SPEC_E2E_TARGET / SPEC_E2E_DRAFT.
+可通过 SPEC_E2E_TARGET / SPEC_E2E_DRAFT 覆盖模型.
 """
 
 from __future__ import annotations
@@ -48,7 +50,6 @@ class TestSpeculativeE2ELlama(unittest.TestCase):
 
         cls.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         dtype = torch.float16 if cls.device.type == "cuda" else torch.float32
-
         cls.tok = AutoTokenizer.from_pretrained(_TARGET_ID)
         cls.target = (
             AutoModelForCausalLM.from_pretrained(_TARGET_ID, torch_dtype=dtype)
@@ -71,6 +72,8 @@ class TestSpeculativeE2ELlama(unittest.TestCase):
     def test_lossless_vs_greedy_baseline(self) -> None:
         enc = self.tok(_PROMPT, return_tensors="pt").to(self.device)
         input_ids = enc["input_ids"]
+
+        # enc = {input_ids, attention_mask, device}
         prompt_len = input_ids.shape[1]
 
         # Baseline: plain greedy decode with the target model only.
@@ -97,6 +100,7 @@ class TestSpeculativeE2ELlama(unittest.TestCase):
             max_new_tokens=_MAX_NEW,
             config=cfg,
         )
+        # * 经过投机解码的output spec_cont
         spec_cont = spec[0, prompt_len:]
 
         m = min(int(base_cont.numel()), int(spec_cont.numel()))
@@ -154,6 +158,7 @@ class TestSpeculativeE2ELlama(unittest.TestCase):
         )
 
     def test_decode_to_text_runs(self) -> None:
+        print("---test_decode_to_text_runs---\n")
         out, text = speculative_greedy_decode_from_strings(
             self.target,
             self.draft,

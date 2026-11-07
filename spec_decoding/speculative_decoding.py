@@ -100,7 +100,7 @@ def speculative_greedy_decode(
         att_full = torch.ones_like(out_ids, device=device)
         # * prefill token
         pref_d = draft_m(out_ids, attention_mask=att_full, use_cache=True)
-
+        # ! cur_past_d 实际上是一个引用, 这种dynamic cache
         cur_past_d = pref_d.past_key_values
         # * logits.shape=[batch, seq_len, vocab_size]
         # * pref_d -> seqlen 维度的最后一个, 在这个维度上取 dim= -1

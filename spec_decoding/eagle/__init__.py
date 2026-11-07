@@ -51,9 +51,6 @@ __all__ = [
     "expand_draft_tree",
     "forward_target_last_hidden",
     "make_hidden_residual_draft_topk_fn",
-    "full_model_tree_verify_logits",
-    "select_append_from_full_tree_logits",
-    "tree_verify_attention_context",
     "tree_draft_to_verify_layout",
     "resolve_verify_attn_backend",
     "flash_attn_available",
@@ -83,18 +80,6 @@ def __getattr__(name: str) -> Any:
         from . import draft_model as dm
 
         return getattr(dm, name)
-    if name == "full_model_tree_verify_logits":
-        from .tree_verify_full import full_model_tree_verify_logits
-
-        return full_model_tree_verify_logits
-    if name == "tree_verify_attention_context":
-        from .tree_verify_full import tree_verify_attention_context
-
-        return tree_verify_attention_context
-    if name == "select_append_from_full_tree_logits":
-        from .tree_verify_full import select_append_from_full_tree_logits
-
-        return select_append_from_full_tree_logits
     if name in (
         "resolve_verify_attn_backend",
         "flash_attn_available",

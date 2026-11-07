@@ -1,30 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-全层 Target 树形 Verify
+全层 Target 树形 Verify(extend 路径)
 
-对 draft 树上 L 个节点 一次 跑完整 PreTrainedModel forward(带已有
-past_key_values 前缀),在 每一层 attention 里对新 token 段的 L×L
-子块施加 树掩码(兄弟分支不可互看),再取 logits[0, i, :] 做叶子路径
-greedy 接受(与 tree_verify_parallel.verify_leaf_path_against_parallel_logits
-规则一致)。
+复用前缀 KV cache,只前向 draft 树的 L 个节点(不重算前缀),每层
+attention 对新 token 段施加树掩码(兄弟分支不可互看),再按 parent→child
+规则做 greedy 接受。
 
-实现要点
+两条入口
 --------
-- 通过 tree_verify_attention_context 临时 patch decoder 的
-  _update_causal_mask / _prepare_decoder_attention_mask,在因果 mask 的
-  右下角 [-L:, -L:] 叠树约束(与 EAGLE/modeling_llama_kv.py 相同)。
-- verify 步 use_cache=False,避免把整棵 draft 树写进 KV;接受段仍由
-  runner 用 append 重放对齐 cache。
-- verify_attn_backend=eager(默认回退):_attn_implementation=eager + 树 mask patch。
-- verify_attn_backend=flash_attn(topk==1):官方 Flash Attention,无树 mask。
-- verify_attn_backend=triton_tree(topk>1):SGLang extend_attention_fwd + custom_mask。
+- full_tree_verify_extend:HF sdpa + [1,1,L,past+L] 4D 树 cross mask。
+- full_tree_verify_triton:SGLang extend_attention_fwd + custom_mask。
+
+verify 跑在 cache 副本/临时 extend 后 crop,不污染 runner 的 past;
+root 接受用 recovery_logits(out_ids 之后那一位的 logits)。
 """
 
 from __future__ import annotations
 
-import types
-from contextlib import contextmanager
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, List, Tuple
 
 import torch
 import torch.nn as nn
@@ -32,20 +25,14 @@ from transformers import PreTrainedModel
 
 from .tree_verify_mask import (
     TreeVerifyLayout,
-    build_tree_allow_mask_4d,
     build_tree_cross_attn_bias_with_prefix,
     layout_tree_position_ids,
 )
 from .tree_verify_attn import (
     build_triton_tree_verify_metadata,
-    resolve_verify_attn_backend,
-    tree_verify_attention_context_flash,
     tree_verify_triton_attention_context,
 )
-from .tree_verify_parallel import (
-    path_node_indices_root_to_leaf,
-    verify_leaf_path_against_parallel_logits,
-)
+from .tree_verify_parallel import path_node_indices_root_to_leaf
 
 
 def _decoder_stack(target_m: PreTrainedModel) -> nn.Module:
@@ -54,226 +41,6 @@ def _decoder_stack(target_m: PreTrainedModel) -> nn.Module:
     raise TypeError(
         "full_model_tree verify expects a HF CausalLM with .model (e.g. Llama/Qwen)"
     )
-
-
-def _apply_tree_block_to_causal(
-    causal: Optional[torch.Tensor],
-    tree_mask_block: torch.Tensor,
-    *,
-    seq_len: int,
-    min_dtype: torch.dtype,
-) -> torch.Tensor:
-    """Merge tree allow/block into the draft×draft corner of a 4D causal mask."""
-    tl = tree_mask_block.size(-1)
-    if causal is None:
-        causal = torch.zeros(
-            1,
-            1,
-            seq_len,
-            seq_len,
-            device=tree_mask_block.device,
-            dtype=min_dtype,
-        )
-    block = tree_mask_block.to(device=causal.device, dtype=causal.dtype)
-    causal[:, :, -tl:, -tl:][block == 0] = torch.finfo(causal.dtype).min
-    return causal
-
-
-@contextmanager
-def tree_verify_attention_context(
-    decoder: nn.Module,
-    tree_mask_block: torch.Tensor,
-):
-    """
-    patch decoder的_update_causal_mask / _prepare_decoder_attention_mask,在因果 mask 的 [-L:, -L:] 子块上叠 树掩码
-    Install tree_mask_block on decoder for the duration of one tree verify forward.
-    """
-    config = getattr(decoder, "config", None)
-    saved_impl: Optional[str] = None
-    if config is not None and hasattr(config, "_attn_implementation"):
-        saved_impl = config._attn_implementation
-        config._attn_implementation = "eager"
-
-    decoder._llmqrt_tree_mask_block = tree_mask_block
-    originals: List[Tuple[str, Callable[..., Any]]] = []
-
-    if hasattr(decoder, "_update_causal_mask"):
-        orig = decoder._update_causal_mask
-
-        def _patched_update(
-            self,
-            attention_mask: torch.Tensor,
-            input_tensor: torch.Tensor,
-            cache_position: torch.Tensor,
-            past_key_values: Any,
-            output_attentions: bool,
-            **kwargs: Any,
-        ):
-            causal = orig(
-                attention_mask,
-                input_tensor,
-                cache_position,
-                past_key_values,
-                output_attentions,
-                **kwargs,
-            )
-            tm = getattr(self, "_llmqrt_tree_mask_block", None)
-            if tm is not None:
-                min_dtype = torch.finfo(input_tensor.dtype).min
-                causal = _apply_tree_block_to_causal(
-                    causal,
-                    tm,
-                    seq_len=input_tensor.shape[1],
-                    min_dtype=min_dtype,
-                )
-            return causal
-
-        decoder._update_causal_mask = types.MethodType(_patched_update, decoder)
-        originals.append(("_update_causal_mask", orig))
-
-    if hasattr(decoder, "_prepare_decoder_attention_mask"):
-        orig_prep = decoder._prepare_decoder_attention_mask
-
-        def _patched_prepare(
-            self,
-            attention_mask: torch.Tensor,
-            input_shape: torch.Size,
-            inputs_embeds: torch.Tensor,
-            past_key_values_length: int,
-        ):
-            combined = orig_prep(
-                attention_mask, input_shape, inputs_embeds, past_key_values_length
-            )
-            tm = getattr(self, "_llmqrt_tree_mask_block", None)
-            if tm is not None and combined is not None:
-                tl = tm.size(-1)
-                combined[:, :, -tl:, -tl:][
-                    tm.to(device=combined.device, dtype=combined.dtype) == 0
-                ] = combined.min()
-            return combined
-
-        decoder._prepare_decoder_attention_mask = types.MethodType(
-            _patched_prepare, decoder
-        )
-        originals.append(("_prepare_decoder_attention_mask", orig_prep))
-
-    try:
-        yield
-    finally:
-        for name, fn in reversed(originals):
-            setattr(decoder, name, fn)
-        if hasattr(decoder, "_llmqrt_tree_mask_block"):
-            del decoder._llmqrt_tree_mask_block
-        if config is not None and saved_impl is not None:
-            config._attn_implementation = saved_impl
-
-
-# 根据topk,选择不同的verify attn backend,可以是flash attn(topk=1),triton attn(topk>1),eager(回退)
-def _has_legacy_mask_hooks(decoder: nn.Module) -> bool:
-    """transformers<5 用 _update_causal_mask 造 mask;5.x 改成了 create_causal_mask。"""
-    return hasattr(decoder, "_update_causal_mask") or hasattr(
-        decoder, "_prepare_decoder_attention_mask"
-    )
-
-
-@torch.inference_mode()
-def full_model_tree_verify_logits(
-    target_m: PreTrainedModel,
-    layout: TreeVerifyLayout,
-    past_key_values: Any,
-    past_len: int,
-    *,
-    verify_attn_backend: Optional[str] = None,
-    topk: int = 1,
-) -> torch.Tensor:
-    """
-    One full-target forward over L draft nodes with tree-masked self-attention.
-
-    Returns
-    -------
-    logits : [1, L, vocab]
-    """
-    device = next(target_m.parameters()).device
-    l_n = len(layout)
-    if l_n == 0:
-        v = getattr(target_m.config, "vocab_size", 0)
-        return torch.zeros(1, 0, v, device=device)
-
-    draft_ids = torch.tensor([layout.token_ids], device=device, dtype=torch.long)
-    # position ids表示某个token id在树的深度,同一层的token id则position id一样
-    position_ids = layout_tree_position_ids(layout, past_len).unsqueeze(0).to(device)
-    tree_block = build_tree_allow_mask_4d(layout, device=device)
-    decoder = _decoder_stack(target_m)
-    backend = resolve_verify_attn_backend(
-        verify_attn_backend, topk=topk, layout_len=l_n
-    )
-    fwd_kw = dict(
-        past_key_values=past_key_values,
-        position_ids=position_ids,
-        use_cache=False,
-        attention_mask=torch.ones(1, l_n, device=device, dtype=torch.long),
-    )
-
-    if backend == "eager":
-        if _has_legacy_mask_hooks(decoder):
-            with tree_verify_attention_context(decoder, tree_block):
-                out = target_m(draft_ids, **fwd_kw)
-        else:
-            # transformers>=5.x 没有 _update_causal_mask 钩子,不能靠 patch 注入树掩码;
-            # 直接把 [1,1,L,past+L] 的 4D additive(树+前缀)掩码传给模型。
-            cross = build_tree_cross_attn_bias_with_prefix(
-                layout,
-                past_len,
-                device=device,
-                dtype=next(target_m.parameters()).dtype,
-            ).view(1, 1, l_n, past_len + l_n)
-            fwd_kw["attention_mask"] = cross
-            with tree_verify_attention_context(decoder, None):
-                out = target_m(draft_ids, **fwd_kw)
-    elif backend == "flash_attn":
-        with tree_verify_attention_context_flash(decoder):
-            out = target_m(draft_ids, **fwd_kw)
-    elif backend == "triton_tree":
-        # 构建metadata,包括custommask
-        meta = build_triton_tree_verify_metadata(layout, past_len, device=device)
-        # patch attn为tree attention,使用extend attention fwd,然后在target fwd
-        with tree_verify_triton_attention_context(decoder, meta):
-            out = target_m(draft_ids, **fwd_kw)
-    else:
-        raise RuntimeError(f"unknown verify_attn_backend: {backend}")
-    return out.logits
-
-
-def select_append_from_full_tree_logits(
-    logits: torch.Tensor,
-    parent: List[int],
-    token_ids: List[int],
-    leaves: List[int],
-) -> Tuple[List[int], int, int]:
-    """
-    Pick best leaf by greedy match length.
-
-    Returns (append_token_list, best_match_len, best_leaf_index).
-    """
-    best_m = -1
-    best_li = 10**9
-    best_next = 0
-    best_leaf = 0
-    # 对draft tree里的每个draft path对应得draft token ids都去和verify logits比对,看谁match len更长,选最长的那个path,一样长得话选logits大得那个
-    for li, leaf in enumerate(leaves):
-        mlen, nxt = verify_leaf_path_against_parallel_logits(
-            logits, parent, token_ids, leaf
-        )
-        if mlen > best_m or (mlen == best_m and li < best_li):
-            best_m, best_li, best_next, best_leaf = mlen, li, nxt, leaf
-
-    path = path_node_indices_root_to_leaf(parent, int(best_leaf))
-    path_toks = [token_ids[i] for i in path]
-    if best_m == len(path_toks):
-        append_list = path_toks + [best_next]
-    else:
-        append_list = path_toks[:best_m] + [best_next]
-    return append_list, best_m, best_leaf
 
 
 # -----------------------------------------------------------------------------
@@ -300,7 +67,7 @@ def _crop_cache_back_to(past_key_values: Any, target_len: int) -> None:
         past_key_values.crop(target_len)
 
 
-def _extend_then_crop(
+def _forward_and_extend_dynamic_kv_then_crop(
     target_m, tree_tokens, past_key_values, *, position_ids, attention_mask
 ):
     """在 runner 的 past 上临时 extend(追加 L 个树节点 KV)跑一次 forward,取完 logits 后 crop 还原。
@@ -308,58 +75,71 @@ def _extend_then_crop(
     比深拷贝整份 cache 便宜得多(只多存/截掉 L 个位置的 KV);KV-replay 用全长 mask 后 past 不被污染。
     """
     before = int(past_key_values.get_seq_length())
+    # * 实际推理
     out = target_m(
-        tree_tokens,
+        tree_tokens,  # [batch_size, seq_len]
         past_key_values=past_key_values,
         position_ids=position_ids,
         use_cache=True,
         attention_mask=attention_mask,
     )
-    logits0 = out.logits[0]
-    _crop_cache_back_to(
-        past_key_values, before
-    )  # 去掉本次 verify 追加的树 KV,还原成 out_ids 的 KV
+    # out.logits -> [batch_size, seq_len, voc_size]
+    logits0 = out.logits[0]  # [seq_len, voc_size]
+    # 去掉本次 verify 追加的树 KV,还原成 out_ids 的 KV
+    _crop_cache_back_to(past_key_values, before)
     return logits0
 
 
 def _select_append_root_child(
-    node_logits: torch.Tensor,
-    recovery_logits: torch.Tensor,
+    all_node_logits: torch.Tensor,
+    root_logits: torch.Tensor,
     parent: List[int],
     token_ids: List[int],
     leaves: List[int],
 ) -> Tuple[List[int], int, int, List[int]]:
-    """从每节点输出预测其子节点的 node_logits + root 用 recovery_logits 做 greedy 接受."""
-    best_m = -1
-    best_li = 10**9
-    best_next = 0
-    best_leaf = 0
-    for li, leaf in enumerate(leaves):
-        idxs = path_node_indices_root_to_leaf(parent, leaf)
-        toks = [token_ids[i] for i in idxs]
-        m = 0
-        corr = None
-        for k in range(len(idxs)):
-            src = recovery_logits if k == 0 else node_logits[idxs[k - 1]]
-            pred = int(src.argmax(dim=-1).item())
-            if pred == toks[k]:
-                m += 1
-            else:
-                corr = pred
-                break
-        if m == len(idxs):
-            nxt = int(node_logits[idxs[-1]].argmax(dim=-1).item())
-        else:
-            nxt = int(corr)
-        if m > best_m or (m == best_m and li < best_li):
-            best_m, best_li, best_next, best_leaf = m, li, nxt, leaf
-    path_idx = path_node_indices_root_to_leaf(parent, int(best_leaf))
-    path_toks = [token_ids[i] for i in path_idx]
-    if best_m == len(path_toks):
-        append_list = path_toks + [best_next]
-    else:
-        append_list = path_toks[:best_m] + [best_next]
-    return append_list, best_m, int(best_leaf), path_toks
+    """在所有根→叶路径中选接受最长的一条,返回本轮要 append 的 token."""
+    best_accepted_len, best_next_token, best_leaf = -1, 0, 0
+    for leaf in leaves:
+        accepted_len, next_token = _match_one_leaf_path(
+            all_node_logits, root_logits, parent, token_ids, leaf
+        )
+        if accepted_len > best_accepted_len:  # 接受数相同时,保留排在前面的路径
+            best_accepted_len, best_next_token, best_leaf = (
+                accepted_len,
+                next_token,
+                leaf,
+            )
+
+    best_path_nodes = path_node_indices_root_to_leaf(parent, best_leaf)
+    best_path_tokens = [token_ids[i] for i in best_path_nodes]
+    append_list = best_path_tokens[:best_accepted_len] + [best_next_token]
+    return append_list, best_accepted_len, int(best_leaf), best_path_tokens
+
+
+def _match_one_leaf_path(
+    all_node_logits: torch.Tensor,
+    root_logits: torch.Tensor,
+    parent: List[int],
+    token_ids: List[int],
+    leaf: int,
+) -> Tuple[int, int]:
+    """对单条根→叶路径逐位 greedy 比对,返回 (接受个数, 下一位 token).
+
+    对齐规则:路径上第 pos 个节点提案的 token,由它父节点的输出 logits 预测——
+    pos=0 没有父(直接挂前缀后),用 root_logits(前缀末位的预测);
+    pos>0 用 all_node_logits[父]。首个不一致即停,下一位给 target 的修正;
+    全中则下一位是叶节点自己的 argmax(bonus)。
+    """
+    path_nodes = path_node_indices_root_to_leaf(parent, leaf)
+    for pos, node_idx in enumerate(path_nodes):
+        # 预测源:根节点用 root_logits,其余用父节点的输出 logits
+        source_logits = (
+            root_logits if pos == 0 else all_node_logits[path_nodes[pos - 1]]
+        )
+        target_token = int(source_logits.argmax(dim=-1).item())
+        if target_token != token_ids[node_idx]:
+            return pos, target_token  # 接受前 pos 个,第 pos+1 位用 target 修正
+    return len(path_nodes), int(all_node_logits[path_nodes[-1]].argmax(dim=-1).item())
 
 
 @torch.inference_mode()
@@ -370,8 +150,6 @@ def full_tree_verify_extend(
     past_len: int,
     recovery_logits: torch.Tensor,
     *,
-    parent: List[int],
-    token_ids: List[int],
     leaves: List[int],
     device: torch.device,
 ) -> Tuple[List[int], int, int, List[int]]:
@@ -386,11 +164,11 @@ def full_tree_verify_extend(
         layout, past_len, device=device, dtype=dtype
     ).view(1, 1, L, past_len + L)
     pos = layout_tree_position_ids(layout, past_len).unsqueeze(0).to(device)
-    node_logits = _extend_then_crop(
+    node_logits = _forward_and_extend_dynamic_kv_then_crop(
         target_m, tree_tokens, past_key_values, position_ids=pos, attention_mask=cross
     )  # [L, V]
     return _select_append_root_child(
-        node_logits, recovery_logits, parent, token_ids, leaves
+        node_logits, recovery_logits, layout.parent, layout.token_ids, leaves
     )
 
 
@@ -400,30 +178,45 @@ def full_tree_verify_triton(
     layout: TreeVerifyLayout,
     past_key_values: Any,
     past_len: int,
-    recovery_logits: torch.Tensor,
+    root_logits: torch.Tensor,
     *,
-    parent: List[int],
-    token_ids: List[int],
     leaves: List[int],
     device: torch.device,
 ) -> Tuple[List[int], int, int, List[int]]:
-    """extend verify 的 triton 版:复用前缀 KV,用 SGLang extend_attention_fwd + 树 custom_mask。
-
-    数值与 full_tree_verify_extend 等价;同样在 cache 副本上跑、root 接受用 recovery_logits。
+    """extend verify 的 triton 版:
+    复用前缀 KV,用 SGLang extend_attention_fwd + 树 custom_mask。
+    数值与 full_tree_verify_extend 等价;
+    同样在 cache 副本上跑、root 接受用 root_logits
     """
-    L = len(layout)
+    L = len(layout)  # draft_lens
+    # (Pdb) layout
+    # TreeVerifyLayout(token_ids=[23557, 18160, 18160, 23557, 23557, 18160],
+    # parent=[-1, -1, 0, 0, 1, 1], dfs_order=[0, 1, 2, 3, 4, 5])
+    # import pdb
+
+    # pdb.set_trace()
+    # [batch_size, seq_len]
     tree_tokens = torch.tensor([layout.token_ids], device=device, dtype=torch.long)
+    # * past_len = 6, layout -> [0, 0, 1, 1, 1, 1]
+    # * pos->[6,6,7,7,7,7]
     pos = layout_tree_position_ids(layout, past_len).unsqueeze(0).to(device)
+    # * 创建
     meta = build_triton_tree_verify_metadata(layout, past_len, device=device)
     decoder = _decoder_stack(target_m)
+    # * decoder -> embedding + decoder layer (remove LM head)
+    # ! with tree_verify_triton_attention_context 实际上就是使用 trition kernel 去替换linear中的
+    # * 每次都需要重新建树, 重新替换attention之后验证, 然后 再替换回去
     with tree_verify_triton_attention_context(decoder, meta):
-        node_logits = _extend_then_crop(
+        all_node_logits = _forward_and_extend_dynamic_kv_then_crop(
             target_m,
             tree_tokens,
-            past_key_values,
+            past_key_values,  # * 从runner 中就一直是引用传递
             position_ids=pos,
             attention_mask=torch.ones(1, L, device=device, dtype=torch.long),
-        )  # [L, V]
+        )
+        # [L, V]
+    # * 一次验证的逻辑, 贪心, 没有对比draft 以及 target的logits, 直接one-hot对比输出
+    # * node_logits == logit[0] -> [seq_len, vob_size]
     return _select_append_root_child(
-        node_logits, recovery_logits, parent, token_ids, leaves
+        all_node_logits, root_logits, layout.parent, layout.token_ids, leaves
     )

@@ -4,12 +4,11 @@
 
 完整一轮投机在概念上永远是:
 
-  ① Target 跑当前前缀(可带 KV cache)→ 取 末 token 的 hidden
-  ② Draft 在该 hidden 条件下 topk 展开成树
-  ③ Verify:要么 树注意力 一次算清(需自接模型 + tree_verify_mask),
-    要么如本文件 逐叶子路径 用 HF causal forward 与 greedy 对齐(实现简单)
+  1. Target 跑当前前缀(可带 KV cache)→ 取 末 token 的 hidden
+  2. Draft 在该 hidden 条件下 topk 展开成树
+  3. Verify:要么 树注意力 一次算清(需自接模型 + tree_verify_mask), 逐叶子路径 用 HF causal forward 与 greedy 对齐(实现简单)
 
-本模块与 eagle_speculative 无互相 import。
+本模块与 eagle_speculative 无互相 import
 
 --------------------------------------------------------------------
 当前实现细节(读代码时对照)
@@ -48,10 +47,8 @@ from .tree_verify_mask import (
 )
 from .tree_verify_attn import triton_extend_available
 from .tree_verify_full import (
-    full_model_tree_verify_logits,
     full_tree_verify_extend,
     full_tree_verify_triton,
-    select_append_from_full_tree_logits,
 )
 
 
@@ -142,24 +139,26 @@ def _verify_path_clean(
 # -----------------------------------------------------------------------------
 class Eagle1Generator:
     """
-    Target hidden 条件 draft(经 draft_topk_fn)+ 静态 topk 树 + 参考 verify。
+    以 target hidden 为条件的 draft(通过 draft_topk_fn 提供)+ 静态 top-k 树 + 树验证。
 
-    draft_topk_fn 可由 draft_model.make_eagle1_draft_topk_fn(轻量 EAGLE1 draft)
-    或 make_hidden_residual_draft_topk_fn(外部完整模型 + proj)构造。
+    draft_topk_fn 通过 draft_model.make_eagle1_draft_topk_fn(轻量 EAGLE1 draft)构造,
+    或通过 make_hidden_residual_draft_topk_fn(外部完整模型 + 投影层)构造。
     """
 
     def __init__(
         self,
         target: Union[PreTrainedModel, nn.Module],
         cfg: Eagle1Config,
-        draft_topk_fn: DraftTopkFn,
+        draft_topk_fn: DraftTopkFn,  # * 封装小模型的function
         *,
         refresh_target_each_node: bool = True,
     ) -> None:
         """保存 target、配置与 draft topk 回调。
 
-        refresh_target_each_node=True(默认):展开树时对每个内部节点重新前向 target 取 hidden
-        (接受率更高、但每节点一次 target forward);超大模型建议 False(只用根 hidden,建树仅跑 draft)。
+        refresh_target_each_node=True(默认):
+        展开树时对每个内部节点重新前向 target 取 hidden(接受率更高、但每节点一次 target forward);
+        超大模型建议 False(只用根 hidden,建树仅跑 draft)。
+        真跑一次合理吗?
         """
         self.target = target
         self.target_m = _unwrap(target)
@@ -183,36 +182,33 @@ class Eagle1Generator:
     # 单轮:prefix + past → 建树 →(可选)逐叶 verify → 得到本步要追加的 token 列
     # ------------------------------------------------------------------
     @torch.inference_mode()
-    def generate_step_payload(
+    def run_speculative_step(
         self,
-        full_prefix_ids: torch.LongTensor,
-        past_before: Any,
-        last_token_id: torch.LongTensor,
-        recovery_logits: Optional[torch.Tensor] = None,
-        root_hidden: Optional[torch.Tensor] = None,
+        full_prefix_ids: torch.LongTensor,  # * all prefill tokens
+        past_before: Any,  # * pass to cache
+        last_token_id: torch.LongTensor,  # * last token in prefill token
+        recovery_logits: Optional[torch.Tensor] = None,  # * new token to start draft
+        root_hidden: Optional[torch.Tensor] = None,  # * new hidden state to start draft
     ) -> Tuple[
         Optional[torch.LongTensor], TreeVerifyLayout, torch.Tensor, TreeDraftResult
     ]:
         """
-        单轮投机:(append_chunk, layout, attn_bias_2d, draft_result)。
+        执行一轮投机:用 draft 建树 → 用 target 验证 → 返回本轮可接受的 token 段.
 
-        返回的 attn_bias_2d:reference_paths 为 [L,L] 树内掩码;
-        full_model_tree 为 [L, past+L] cross 掩码。
+        返回四元组 (append, layout, attn_bias_2d, draft_result):
 
-        root_hidden:可由 runner 从 prefill/append-replay 的 output_hidden_states 透传,省掉本轮
-        对整段前缀的额外 target 前向(大模型加速关键);None 时退回干净整段前向。
+        - append         [1, n] 本轮新增 token,不含前缀;n 至少 1,最多 num_steps+1
+        - layout         TreeVerifyLayout,树的父子关系与 DFS 遍历顺序
+        - attn_bias_2d   验证时用的注意力掩码,形状随 verify_mode 变化:
+                         full_model_tree → [L, past_len + L](树内 + 前缀 KV)
+                         reference_paths → [L, L](仅树内,不复用前缀 KV)
+        - draft_result   expand_draft_tree 的原始输出(token_ids / parent / 分数)
+
+        root_hidden 由调用方从 prefill 或上一轮 replay 的 output_hidden_states 透传,
+        可省掉本轮对整段前缀的一次 target 前向(大模型上这是关键加速);
+        传 None 时退回用 forward_target_last_hidden 重算。
         """
         device = full_prefix_ids.device
-        # 根 token 的 target 末 hidden:优先用透传的(避免重算整段前缀),否则干净整段前向.
-        if root_hidden is not None:
-            h_root = root_hidden
-        else:
-            h_root, _, _ = forward_target_last_hidden(
-                self.target,
-                full_prefix_ids,
-                hidden_layer_index=self.cfg.hidden_layer_index,
-                use_cache=False,
-            )
 
         def refresh(prefix: torch.LongTensor) -> torch.Tensor:
             return self._refresh_hidden(prefix)
@@ -221,7 +217,7 @@ class Eagle1Generator:
         _refresh = refresh if self.refresh_target_each_node else None
         draft_res = expand_draft_tree(
             self.cfg,
-            h_root,
+            root_hidden,
             last_token_id,
             self.draft_topk_fn,
             target_hidden_refresh=_refresh,
@@ -232,8 +228,11 @@ class Eagle1Generator:
         layout = tree_draft_to_verify_layout(draft_res)
 
         past_len = int(full_prefix_ids.shape[1])
+
+        # * 遍历返回所有叶子节点的下标
         leaves = _leaf_indices(draft_res.parent)
-        # 没有叶子,说明只有root token,没有path tokens
+
+        # TODO 没有叶子,说明只有root token,没有path tokens, 特殊情况, 可以合并到下面的情况中
         if not leaves:
             _, nxt = _verify_path_clean(self.target_m, full_prefix_ids, [], device)
             bias = build_tree_sdpa_attn_bias(layout, device=device, dtype=torch.float32)
@@ -243,6 +242,8 @@ class Eagle1Generator:
                 bias,
                 draft_res,
             )
+
+        # * 如果有叶子节点
         if self.cfg.verify_mode == "full_model_tree":
             if recovery_logits is None:
                 raise ValueError("full_model_tree verify requires recovery_logits")
@@ -261,11 +262,11 @@ class Eagle1Generator:
                 past_before,
                 past_len,
                 recovery_logits,
-                parent=draft_res.parent,
-                token_ids=draft_res.token_ids,
                 leaves=leaves,
                 device=device,
             )
+            # * 实际上返回仅仅append list 有用
+            # * append_list from [accept_len] -> [batch_size, accept_len]
             append = torch.tensor([append_list], device=device, dtype=torch.long)
             cross_bias = build_tree_cross_attn_bias_with_prefix(
                 layout, past_len, device=device, dtype=torch.float32
@@ -300,7 +301,7 @@ class Eagle1Generator:
         return append, layout, bias, draft_res
 
     # ------------------------------------------------------------------
-    # 多轮自回归:每轮 = generate_step_payload + 用 target 重放 append 以对齐 KV.
+    # 多轮自回归:每轮 = run_speculative_step + 用 target 重放 append 以对齐 KV.
     # ------------------------------------------------------------------
     @torch.inference_mode()
     def generate(
@@ -318,37 +319,68 @@ class Eagle1Generator:
             raise ValueError(
                 "generate() requires verify_mode in full_model_tree, reference_paths"
             )
+        # import pdb
 
+        # pdb.set_trace()
+        # [batch_size, seq_len]
         device = input_ids.device
         out_ids = input_ids.clone()
+        # * out_ids.shape =  [batch, seq]
         new_tok = 0
         # Prefill:建立 target KV(past)
-        att = torch.ones_like(out_ids, device=device)
+        atten = torch.ones_like(out_ids, device=device)
+        # *output_hidden_states 输出每一层的hidden state
         out0 = self.target_m(
-            out_ids, attention_mask=att, use_cache=True, output_hidden_states=True
+            out_ids,
+            attention_mask=atten,
+            use_cache=True,
+            output_hidden_states=True,
         )
+        # import pdb
+
+        # pdb.set_trace()
+
         past = out0.past_key_values
+
         # out_ids 之后那一位的 target logits(extend verify 的 root 接受参照)+ 末 token 的 hidden
         # (draft 树根条件).从同一次前向取出,省掉每轮额外的整段前缀 forward.
+        """
+        (Pdb) out0.logits.shape
+        torch.Size([1, 6, 32000])
+        取最后一个单词的voc
+        """
         recovery_logits = out0.logits[0, -1]
+        """
+        - 是 tuple ，长度 =`num_hidden_layers + 1`
+        - `[0]` = embedding 层输出（还没进第一层 Transformer)
+        - `[i]` = 第 i 层 Transformer 的输出
+        - `[-1]` = 最后一层（且已经过 final norm)
+        - 每个元素形状`[B, S, H]`
+        """
+        # * root_hidden.shape = [batch_size, hidden_state]
         root_hidden = out0.hidden_states[self.cfg.hidden_layer_index][:, -1, :]
 
         while new_tok < max_new_tokens:
             if eos_token_id is not None and out_ids[0, -1].item() == eos_token_id:
                 break  # 已到 EOS,停止
-            last_t = out_ids[:, -1:]
-            # 一轮:建树 + verify,得到本轮要采纳的 token 段 append
-            append, _, _, _ = self.generate_step_payload(
-                out_ids, past, last_t, recovery_logits, root_hidden
+            last_token = out_ids[:, -1:]
+            # * 一轮:草稿推理 + 建树 + verify,得到本轮要采纳的 token 段 append
+            append, _, _, _ = self.run_speculative_step(
+                out_ids, past, last_token, recovery_logits, root_hidden
             )
+            # import pdb
+
+            # pdb.set_trace()
             # 把 append 重放进 target KV.注意:带 past 时 attention_mask 必须覆盖 [past + append]
             # 全长,否则 append 不会 attend 到前缀 → out_sync.logits(recovery_logits)错.
             # (extend verify 在 past 的副本上跑,不污染 past;故 past 始终 = out_ids 的 KV.)
+            # * append -> [batch_size, accept_lengths]
             full_attn = torch.ones(
                 (1, int(past.get_seq_length()) + int(append.shape[1])),
                 device=device,
                 dtype=torch.long,
             )
+            # * 一轮的投机结束, 使用target 推理一次, 复位上文的变量
             out_sync = self.target_m(
                 append,
                 past_key_values=past,
