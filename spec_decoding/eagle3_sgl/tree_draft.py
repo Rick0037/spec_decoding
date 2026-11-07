@@ -1,15 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-目前保持与EAGLE1一致:Top-k > 1 → 静态树形 Draft(多分支并行猜)
+EAGLE3-SGL 建树:同一文件三种展开策略,由 runner 按 autoregressive_draft /
+tree_expand_mode 分发:
 
-链式投机(topk=1)每步只保留 一个 下一 token;EAGLE1 每步保留 K 个 子节点,
-按 BFS 顺序 展开成一棵 静态树,直到深度 num_steps 或节点数达到
-max_tree_nodes。
+- expand_draft_tree     :EAGLE1 静态 top-k BFS 树(不看分数,按 BFS 顺序填满 max_tree_nodes)。
+- expand_draft_tree_topk:累计 log 概率 beam + 按分数全局剪枝。
+- expand_draft_tree_ar  :自回归建树(draft 带 KV cache + feature 递归)。
 
-树形状只由 topk / num_steps / max_tree_nodes 这几个超参静态决定。
-
-draft_topk_fn:(target last-token hidden, 父节点 token id) → topk ids + 分数。
-分数(第二个返回值)在 EAGLE1 中不参与建树,仅为与 EAGLE2 接口兼容而保留。
+draft_topk_fn:(多层 act [B, n*H], 父节点 token id) → topk ids + 分数。
+分数:static 不参与建树;cumulative 由 _topk_log_probs 规范化为 log 概率。
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ class TreeDraftResult:
     bfs_index: List[int]
     """节点创建顺序(调试用)。"""
     cum_log_probs: List[float] = field(default_factory=list)
-    """每个节点的累计 log 概率(cumulative 模式用;static 模式留空)。"""
+    """* [继承自 EAGLE2] 每个节点的累计 log 概率(cumulative 模式用;static 模式留空)。"""
 
 
 DraftTopkFn = Callable[
@@ -189,14 +188,13 @@ def expand_draft_tree(
 
 
 # =============================================================================
-# eagle2剪枝暂时未被用到
 # EAGLE-2 风格 累计概率剪枝(cumulative beam)—— 相对EAGLE1 静态树多出来的能力:
 # 每层把 cum_logp(child) = cum_logp(parent) + log p(child|parent) 作为分数,只保留全局
 # 累计分最高的 K 条活跃路径(beam);展开完再按累计分把节点数压到 max_tree_nodes(保留祖先,
 # 保证 parent 链有效).这样在相同节点预算下把算力集中到draft 更有把握的分支,接受率更高.
 # =============================================================================
 @dataclass
-class _FrontierNode:
+class _FrontierNode:  # * [继承自 EAGLE2] beam 活跃节点
     tree_idx: int
     cum_logp: float
     hidden: torch.Tensor
@@ -208,9 +206,11 @@ def _topk_log_probs(
     topk_scores: torch.Tensor,
     k: int,
 ) -> Tuple[List[int], List[float]]:
-    """把 draft_topk_fn 返回的分数规范为 log 概率。
+    """* [继承自 EAGLE2] 把 draft_topk_fn 返回的分数规范为 log 概率。
 
-    EAGLE3 的 make_eagle3_sgl_draft_topk_fn 返回的是 原始 logits 的 top-k 分数,暂时还没有集成eagle2的剪枝,目前此函数仅适用eagle2
+    EAGLE3 的 make_eagle3_sgl_draft_topk_fn 返回原始 logits 的 top-k 分数,
+    走上半分支:在 top-k 子集上 log_softmax 成可沿路径累加的条件 log 概率;
+    传入已全为非正(如 EAGLE2 的 log_softmax 输出)则直接透传。
     """
     ids = topk_ids[0, :k].tolist()
     sc = topk_scores[0, :k].float()
@@ -232,7 +232,7 @@ def _compact_tree_by_score(
     cum_log_probs: List[float],
     max_nodes: int,
 ) -> Tuple[List[int], List[int], List[int], List[float]]:
-    """按累计分保留至多 max_nodes 个节点,并带上其祖先(保证 parent 链有效)."""
+    """* [继承自 EAGLE2] 按累计分保留至多 max_nodes 个节点,并带上其祖先(保证 parent 链有效)."""
     n = len(token_ids)
     if n <= max_nodes:
         return token_ids, parent, node_depth, cum_log_probs
@@ -267,7 +267,7 @@ def expand_draft_tree_topk(
     initial_prefix_ids: Optional[torch.LongTensor] = None,
 ) -> TreeDraftResult:
     """
-    EAGLE-2 风格 draft 树:每层累计 log 概率 + 全局 top-K beam,最后再按分数截断。
+    * [继承自 EAGLE2] EAGLE-2 风格 draft 树:每层累计 log 概率 + 全局 top-K beam,最后再按分数截断。
 
     Parameters 同 expand_draft_tree。要点:
 
@@ -366,7 +366,7 @@ def expand_draft_tree_ar(
     *,
     device: torch.device,
 ) -> TreeDraftResult:
-    """自回归(KV cache + RoPE + feature 递归)静态 top-k BFS 树展开。
+    """* [EAGLE3 新增 vs EAGLE1/2] 自回归(KV cache + RoPE + feature 递归)静态 top-k BFS 树展开。
 
     与 expand_draft_tree 树形状相同(静态 BFS),但 draft step()带状态,
     条件 hidden 在 draft 内部递归更新,而非每节点回调 draft_topk_fn。

@@ -164,7 +164,7 @@ def _verify_path_clean(
 
 @dataclass
 class _DraftKvState:
-    """AR draft 增量状态;generate() 每轮 extend 后更新,供 expand_draft_tree_ar 复用."""
+    """* [EAGLE3 新增 vs EAGLE1/2] AR draft 增量状态;generate() 每轮 extend 后更新,供 expand_draft_tree_ar 复用."""
 
     kv: Any
     """draft midlayer 的 (k, v);序列长度 = prefix_len - 1(EAGLE shift)。"""
@@ -282,6 +282,8 @@ class Eagle3SglGenerator:
         TreeDraftResult
             摊平后的 draft 树(token_ids / parent / node_depth 等)。
         """
+        # * [EAGLE3 新增 vs EAGLE1/2] AR 建树:draft 自回归(KV fork + feature 递归);
+        # 非 AR 则像 eagle1/eagle2 那样每节点回调 draft_topk_fn。
         if self.autoregressive_draft:
             # AR:decode 轮用上一轮 extend 后的 root_logits/root_hidden/kv
             if draft_state is not None:
@@ -318,6 +320,7 @@ class Eagle3SglGenerator:
         else:
             h_root = self._refresh_hidden(prefix_ids)
         refresh = self._refresh_hidden if self.refresh_target_each_node else None
+        # * [继承自 EAGLE2] cumulative=累计概率 beam 剪枝;static=EAGLE1 静态 BFS
         expand_fn = (
             expand_draft_tree_topk
             if self.cfg.tree_expand_mode == "cumulative"

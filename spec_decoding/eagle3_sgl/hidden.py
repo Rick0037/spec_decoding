@@ -32,7 +32,8 @@ def select_eagle_acts_from_hidden_states(
     last_token_only: bool = True,
 ) -> torch.Tensor:
     """
-    从 HF output_hidden_states 元组里取多层激活并拼接,供 EAGLE3 draft 吸取作为输入。
+    * [EAGLE3 新增 vs EAGLE1/2] 从 HF output_hidden_states 元组里取多层激活并拼接,
+    供 EAGLE3 draft 吸收作为输入(EAGLE1/2 只取单层末 hidden)。
 
     Parameters
     ----------

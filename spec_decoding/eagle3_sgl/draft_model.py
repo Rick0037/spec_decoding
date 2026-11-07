@@ -737,6 +737,10 @@ def load_eagle3_draft_weights(
 def make_eagle3_sgl_draft_topk_fn(draft_model: Eagle3SglDraftModel, topk: int):
     """工厂:把 Eagle3SglDraftModel 包成 tree_draft.DraftTopkFn。
 
+        * [与 EAGLE2 的差异] 分数是原始 logits 的 top-k 值(未 log_softmax;eagle2 的
+        make_eagle2_draft_topk_fn 返回 log 概率)。cumulative 建树时由 _topk_log_probs
+        在 top-k 子集上规范化。d2t 映射(draft id → target id)是 EAGLE3 独立 draft 词表特有。
+
         若 draft 用独立词表(hot_token_id 非空),topk 得到的是 draft id,会经 d2t 映射成
         target vocab id 再返回(树与 verify 始终在 target 词表空间)。
 

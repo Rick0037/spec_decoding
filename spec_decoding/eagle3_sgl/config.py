@@ -33,12 +33,14 @@ class Eagle3SglConfig:
     """draft 节点上限:cumulative 模式按累计分剪枝、static 模式按 BFS 顺序截断。"""
     tree_expand_mode: str = "cumulative"
     """
+    * [继承自 EAGLE2] 树展开策略开关(eagle2 叫 bfs,这里叫 static):
     cumulative(默认,EAGLE-2 能力):每层累计 log 概率 + 全局 top-K beam,末尾按累计分剪枝,
         在相同节点预算下把算力集中到 draft 更有把握的分支(接受率更高)。
     static:EAGLE-1 静态 top-k BFS 树(不看分数、按 BFS 顺序填满 max_tree_nodes)。
     """
     eagle_layers: Optional[List[int]] = None
-    """作为 draft 条件的 target 多层 hidden 下标;None 时用 default_eagle_layers。"""
+    """* [EAGLE3 新增 vs EAGLE1/2] 作为 draft 条件的 target 多层(低/中/高)hidden 下标;
+    EAGLE1/2 只用单层 hidden,EAGLE3 拼多层;None 时用 default_eagle_layers。"""
     verify_mode: str = "full_model_tree"
     """
     full_model_tree(推荐):一次 全层 target forward + 树掩码(tree_verify_full)。

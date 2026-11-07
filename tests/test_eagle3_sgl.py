@@ -3,7 +3,9 @@
 EAGLE3-SGL(EAGLE3 多层特征 + EAGLE1 静态树 + tree verify)。
 Gated behind RUN_SPEC_E2E(loads a tiny HF model)。
 
-    RUN_SPEC_E2E=1 PYTHONPATH=. python3 -m unittest tests.test_eagle3_sgl -v
+    HF_HOME=/root/autodl-tmp/hf_cache HF_HUB_OFFLINE=1 RUN_SPEC_E2E=1 PYTHONPATH=. \
+    .venv/bin/python -m unittest tests.test_eagle3_sgl -v
+
 """
 
 from __future__ import annotations
@@ -55,8 +57,7 @@ class TestEagle3Sgl(unittest.TestCase):
             make_eagle3_sgl_draft_topk_fn,
         )
 
-        layers = [0, 1] if self.n_layers <= 2 else list(
-            range(min(3, self.n_layers)))
+        layers = [0, 1] if self.n_layers <= 2 else list(range(min(3, self.n_layers)))
         draft = build_eagle3_sgl_draft(self.target, layers, num_layers=1)
         H = int(self.target.config.hidden_size)
         # (1) 多层 aux:fc 输入 = n*H(降维多层 act,与 embedding 分开)
@@ -77,8 +78,7 @@ class TestEagle3Sgl(unittest.TestCase):
             make_eagle3_sgl_draft_topk_fn,
         )
 
-        layers = [0, 1] if self.n_layers <= 2 else list(
-            range(min(3, self.n_layers)))
+        layers = [0, 1] if self.n_layers <= 2 else list(range(min(3, self.n_layers)))
         H = int(self.target.config.hidden_size)
         dv = 16
         # d2t 全 0 -> hot_token_id = arange(dv),draft id 即落在 target [0,dv) 上
@@ -95,8 +95,7 @@ class TestEagle3Sgl(unittest.TestCase):
         )  # 不等于 target 词表
         fn = make_eagle3_sgl_draft_topk_fn(draft, topk=3)
         idx, sc = fn(
-            torch.zeros(1, len(layers) *
-                        H), torch.tensor([[5]], dtype=torch.long)
+            torch.zeros(1, len(layers) * H), torch.tensor([[5]], dtype=torch.long)
         )
         self.assertEqual(idx.shape, (1, 3))
         self.assertTrue(int(idx.max()) < dv)  # 经 d2t 映射后落在 target 词表前 dv 个 id
@@ -112,20 +111,17 @@ class TestEagle3Sgl(unittest.TestCase):
             make_eagle3_sgl_draft_topk_fn,
         )
 
-        layers = [0, 1] if self.n_layers <= 2 else list(
-            range(min(3, self.n_layers)))
+        layers = [0, 1] if self.n_layers <= 2 else list(range(min(3, self.n_layers)))
         H = int(self.target.config.hidden_size)
         dv = 16
         d2t = torch.zeros(dv, dtype=torch.long)
 
-        src = build_eagle3_sgl_draft(
-            self.target, layers, draft_vocab_size=dv, d2t=d2t)
+        src = build_eagle3_sgl_draft(self.target, layers, draft_vocab_size=dv, d2t=d2t)
         path = tempfile.mktemp(suffix=".pt")
         torch.save(src.state_dict(), path)
 
         # 新建一个(随机权重)draft,再从文件加载
-        dst = build_eagle3_sgl_draft(
-            self.target, layers, draft_vocab_size=dv, d2t=d2t)
+        dst = build_eagle3_sgl_draft(self.target, layers, draft_vocab_size=dv, d2t=d2t)
         report = load_eagle3_draft_weights(dst, path)
         self.assertEqual(report["unexpected"], [])
         self.assertGreater(len(report["loaded"]), 0)
@@ -144,8 +140,7 @@ class TestEagle3Sgl(unittest.TestCase):
         )
         with torch.inference_mode():
             self.assertTrue(
-                torch.allclose(src(parent, acts), dst2(
-                    parent, acts), atol=1e-5)
+                torch.allclose(src(parent, acts), dst2(parent, acts), atol=1e-5)
             )
 
     def test_lossless_vs_greedy(self) -> None:
@@ -167,14 +162,14 @@ class TestEagle3Sgl(unittest.TestCase):
                 use_cache=True,
                 pad_token_id=self.target.config.eos_token_id,
             )
-        base_cont = base[0, input_ids.shape[1]:]
+        base_cont = base[0, input_ids.shape[1] :]
 
         cfg = Eagle3SglConfig(
             topk=2,
             num_steps=2,
             max_tree_nodes=8,
             eagle_layers=self.eagle_layers,
-            verify_mode="reference_paths",
+            verify_mode="full_model_tree",
         )
         layers = cfg.resolve_eagle_layers(self.n_layers)
         draft = build_eagle3_sgl_draft(self.target, layers, num_layers=1)
@@ -186,7 +181,7 @@ class TestEagle3Sgl(unittest.TestCase):
             autoregressive_draft=True,
         )
         out = gen.generate(input_ids, max_new_tokens=max_new)
-        spec_cont = out[0, input_ids.shape[1]:]
+        spec_cont = out[0, input_ids.shape[1] :]
 
         m = min(int(base_cont.numel()), int(spec_cont.numel()))
         self.assertGreater(m, 0)
