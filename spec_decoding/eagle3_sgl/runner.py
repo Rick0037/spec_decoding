@@ -46,10 +46,8 @@ from .tree_verify_mask import (
 )
 from .tree_verify_attn import triton_extend_available
 from .tree_verify_full import (
-    full_model_tree_verify_logits,
     full_tree_verify_extend,
     full_tree_verify_triton,
-    select_append_from_full_tree_logits,
 )
 
 
@@ -419,8 +417,6 @@ class Eagle3SglGenerator:
                 past_before,
                 past_len,
                 recovery_logits,
-                parent=draft_res.parent,
-                token_ids=draft_res.token_ids,
                 leaves=leaves,
                 device=device,
             )

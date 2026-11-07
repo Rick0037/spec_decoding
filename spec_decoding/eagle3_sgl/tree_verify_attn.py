@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Verify attention backends for full_model_tree:
+Verify attention backends(extend 路径):
 
-- flash_attn (topk==1): HF flash_attention_2,标准因果attention,不叠树 mask。
-- triton_tree (topk>1): Triton extend_attention_fwd + custom_mask。
-- eager:tree_verify_attention_context + HF forward(回退 / 对照)。
+- triton_tree (topk>1): SGLang extend_attention_fwd + custom_mask。
+- eager/sdpa: HF forward + 4D 树 cross mask(full_tree_verify_extend)。
 """
 
 from __future__ import annotations
@@ -106,17 +105,20 @@ def build_triton_tree_verify_metadata(
     *,
     device: torch.device,
 ) -> TritonTreeVerifyMetadata:
-    """Build metadata for one tree-verify extend step.
+    """Build SGLang-compatible metadata for one tree-verify extend step.
 
     关键约定:kv_indptr / kv_indices 只描述 前缀 KV(长度 past_len),
     kernel 用 cur_seq_len_prefix = past_len、stage-1 attend 前缀;extend 的 L 个树节点在 K_Extend 里。
-    custom_mask / mask_indptr 行 stride = past_len+L = total_kv。
+    (之前误把 past_len+L 当前缀长度 → stage-1 在 skip_prefix 下把所有树节点当前缀无掩码 attend,
+     兄弟分支泄漏 → 逐节点结果错乱。)custom_mask / mask_indptr 行 stride = past_len+L = total_kv。
     """
     l_n = len(layout)
     total_kv = int(past_len) + l_n
+    # TODO by ruixuan build tree attention mask
     cross = build_tree_cross_attn_bias_with_prefix(
         layout, past_len, device=device, dtype=torch.float32
     )
+    # * 直接转为mask, past length kv 的mask
     custom_mask = (cross == 0).reshape(-1).to(torch.bool)
     qo_indptr = torch.tensor([0, l_n], dtype=torch.int32, device=device)
     # 前缀 KV 长度 = past_len(不含 extend)
@@ -124,6 +126,9 @@ def build_triton_tree_verify_metadata(
     kv_indices = torch.arange(int(past_len), dtype=torch.int32, device=device)
     # mask 行 stride = total_kv(前缀 + extend),与 kernel 的 cur_seq_len 一致
     mask_indptr = torch.tensor([0, l_n * total_kv], dtype=torch.int32, device=device)
+    # import pdb
+
+    # pdb.set_trace()
     return TritonTreeVerifyMetadata(
         qo_indptr=qo_indptr,
         kv_indptr=kv_indptr,
@@ -146,21 +151,6 @@ def tree_custom_mask_bool_flat(
     return build_triton_tree_verify_metadata(
         layout, past_len, device=device
     ).custom_mask
-
-
-@contextmanager
-def tree_verify_attention_context_flash(decoder: nn.Module):
-    """Use HF flash_attention_2 without tree-mask patch (chain / topk=1)."""
-    config = getattr(decoder, "config", None)
-    saved_impl: Optional[str] = None
-    if config is not None and hasattr(config, "_attn_implementation"):
-        saved_impl = config._attn_implementation
-        config._attn_implementation = "flash_attention_2"
-    try:
-        yield
-    finally:
-        if config is not None and saved_impl is not None:
-            config._attn_implementation = saved_impl
 
 
 def _apply_rotary(
@@ -218,6 +208,7 @@ def _triton_tree_attn_forward(
         raise NotImplementedError("triton_tree verify supports batch_size=1 only")
 
     # transformers 5.x 把头数从 attention 模块挪到了 config,这里两种命名都兼容.
+    # *---------parameter-----
     mcfg = getattr(module, "config", None)
     num_heads = getattr(module, "num_heads", None)
     if num_heads is None:
@@ -228,6 +219,7 @@ def _triton_tree_attn_forward(
     head_dim = getattr(module, "head_dim", None)
     if head_dim is None:
         head_dim = module.q_proj.out_features // num_heads
+    # *-----qkv linear
     query_states = (
         module.q_proj(hidden_states)
         .view(bsz, q_len, num_heads, head_dim)
@@ -240,10 +232,15 @@ def _triton_tree_attn_forward(
         module.v_proj(hidden_states).view(bsz, q_len, num_kv, head_dim).transpose(1, 2)
     )
 
+    # * [batch, seq_len, num_heads,  head_dim] -> [batch, num_heads, seq_len, head_dim]
+
+    # *-----rope
     query_states, key_states = _apply_rotary(
         module, query_states, key_states, position_embeddings
     )
 
+    # *-----cache---
+    #! 实际上 past_key_value 是一个dynamic cache, 更新指定index layer的 cache
     if past_key_value is not None:
         cache_kwargs = {}
         if position_embeddings is not None:
@@ -254,6 +251,11 @@ def _triton_tree_attn_forward(
         key_states, value_states = past_key_value.update(
             key_states, value_states, _layer_idx(module), cache_kwargs
         )
+
+    # (Pdb) query_states.shape [batch, num_heads, seq_len, head_dim]
+    # torch.Size([1, 12, 6, 64])
+    # (Pdb) key_states.shape [batch, num_heads, seq_len, head_dim]
+    # torch.Size([1, 12, 12, 64])
 
     # extend_attention_fwd expects Q with all heads, K/V with kv heads (GQA inside kernel).
     q = query_states.transpose(1, 2).reshape(-1, num_heads, head_dim).contiguous()
@@ -308,6 +310,7 @@ def tree_verify_triton_attention_context(
         attn._llmqrt_triton_meta = metadata
         if not hasattr(attn, "_llmqrt_orig_forward"):
             attn._llmqrt_orig_forward = attn.forward
+        # * 原来的forward都放在这里了
         originals.append((attn, attn._llmqrt_orig_forward))
 
         def _wrapped(

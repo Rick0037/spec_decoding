@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tree Verify Attention专用的树形掩码
+"""
+专用 Verify Attention(树形掩码,不是普通 causal)
 
 一次 target forward 里若要把 多个树节点 当作序列上的多个位置一起算
-self-attention,不能用标准下三角 mask:那样会允许兄弟子树互相可见,
-未选中的 draft 分支会污染当前位置的表示
+self-attention,不能用标准下三角 mask:那样会允许 兄弟子树 互相 attend,
+未选中的 draft 分支会污染当前位置的表示,verify 结果 不再等价于只沿
+选中路径逐步算大模型。
 
-做法:位置 i 的 Q 只能可见树意义上从根到 i 路径上的token
+EAGLE 的做法:位置 i 的 Q 只能 attend 树意义上从根到 i 路径上的 key
 (含 i 自身);KV cache 里的历史前缀照常全局可见。
 
 - 仅 树上 L 个新节点 互看时,用 build_tree_sdpa_attn_bias([L,L])。
@@ -33,11 +35,17 @@ import torch
 @dataclass
 class TreeVerifyLayout:
     """
-    一棵 draft 树摊平成 L 个 verify 位置所需的索引结构。
+    draft 树的「摊平」表示:把树拍成一个长度为 L 的节点数组,供一次 verify 前向使用。
 
-    token_ids/parent 与 expand_draft_tree_topk 输出一致即可;掩码只
-    依赖 父子指针(祖先链),与节点在数组中的遍历顺序无强绑定。dfs_order
-    预留与外部 DFS 重排对齐;当前默认 range(L) 时与 BFS 建树的节点下标一致。
+    摊平规则:节点 i = 建树顺序(BFS)下的第 i 个候选 token。
+      - token_ids[i] = 该节点的候选 token
+      - parent[i]    = 该节点父节点的下标;-1 表示直接挂在已确认前缀之后(根的孩子)
+
+    有了 parent 指针就能沿链找回每个节点的全部祖先——这正是树掩码唯一需要的
+    信息:verify 时节点 i 只允许 attend 自己的祖先链(+前缀),不允许看到兄弟
+    分支。至于节点在数组里按什么顺序排(BFS/DFS),掩码逻辑并不关心。
+
+    dfs_order:预留字段,给外部做 DFS 重排时记录映射;当前恒为 range(L)。
     """
 
     token_ids: List[int]
@@ -64,17 +72,7 @@ def node_depth_from_root(parent: List[int], node: int) -> int:
 def layout_tree_position_ids(
     layout: TreeVerifyLayout, past_len: int
 ) -> torch.LongTensor:
-    """树 verify 用的绝对 position_ids [L],即深度。
-
-    Parameters
-    ----------
-    layout
-        draft 树布局;同深度兄弟共享 depth,故 position = past_len + depth。
-    past_len
-        已接受前缀长度 P。
-
-    同一 BFS 层的节点 position 相同(树注意力按深度而非 BFS 下标计 RoPE)。
-    """
+    """Absolute position_ids for batched tree verify, shape [L]."""
     depths = [node_depth_from_root(layout.parent, i) for i in range(len(layout))]
     return torch.tensor(depths, dtype=torch.long) + int(past_len)
 
@@ -112,7 +110,7 @@ def _on_tree_path(parent: Sequence[int], anc: int, desc: int) -> bool:
 
 
 # -----------------------------------------------------------------------------
-# 完整 EAGLE2 verify(单次 forward 版)的核心张量:bias[i,j]=0 当且仅当 j 在
+# 完整verify的核心张量:bias[i,j]=0 当且仅当 j 在
 # i 的祖先链上;否则为 -inf.拼到 past_len+L 的大 mask 时注意只覆盖新 L 列对
 # 新 L 行子块(对 past 的列通常全 0 允许 attend).
 # -----------------------------------------------------------------------------
@@ -184,13 +182,19 @@ def build_tree_cross_attn_bias_with_prefix(
     if n == 0:
         return torch.zeros(0, past_seq_len, device=device, dtype=dtype)
 
-    neg = torch.finfo(dtype).min
+    neg = torch.finfo(dtype).min  # * 默认数值
     bias = torch.full((n, past_seq_len + n), neg, device=device, dtype=dtype)
+    # (Pdb) bias.shape
+    # torch.Size([6, 12])
+    # ! [n, past_seq_len+n] -> (q, k) 相乘
+    # * 每行来看 看之前的 past_seq_len 列都是ok的
     for i in range(n):
         for j in range(past_seq_len + n):
             if j < past_seq_len:
                 bias[i, j] = 0.0
             else:
+                # TODO by ruixuan 计算复杂度可以优化
+                # * 如果能看到 或者在path上不mask
                 k = j - past_seq_len
                 if _on_tree_path(layout.parent, k, i):
                     bias[i, j] = 0.0
