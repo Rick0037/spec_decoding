@@ -3,7 +3,8 @@
 EAGLE2 with the lightweight EAGLE draft model (reuse target embedding/lm_head + fc +
 1 decoder layer). Gated behind RUN_SPEC_E2E (loads a tiny HF model).
 
-    RUN_SPEC_E2E=1 PYTHONPATH=. python3 -m unittest tests.test_eagle2_draft_model -v
+ HF_HOME=/root/autodl-tmp/hf_cache HF_HUB_OFFLINE=1 RUN_SPEC_E2E=1 PYTHONPATH=. .venv/bin/python -m unittest tests.test_eagle2_draft_model -v
+
 """
 
 from __future__ import annotations
@@ -67,7 +68,8 @@ class TestEagle2DraftModel(unittest.TestCase):
             num_steps=2,
             max_tree_nodes=8,
             tree_expand_mode="cumulative",
-            verify_mode="reference_paths",
+            # verify_mode="reference_paths",
+            verify_mode="full_model_tree",
         )
         gen = Eagle2Generator(
             self.target, cfg, make_eagle2_draft_topk_fn(draft, topk=2)
