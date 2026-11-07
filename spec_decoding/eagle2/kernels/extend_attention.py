@@ -22,22 +22,9 @@ def _get_block_sizes_for_extend_attention(Lq: int, Lv: int):
         Lv: Value head dimension
 
     Returns:
-        tuple: (BLOCK_DMODEL, BLOCK_DPE, BLOCK_DV, BLOCK_M, BLOCK_N, num_warps)
+        tuple: (BLOCK_DMODEL, BLOCK_DV, BLOCK_M, BLOCK_N, num_warps)
     """
-    # Determine BLOCK_DMODEL and BLOCK_DPE based on head dimension
-    if Lq == 576:
-        BLOCK_DMODEL = 512
-        BLOCK_DPE = 64
-    elif Lq == 288:
-        BLOCK_DMODEL = 256
-        BLOCK_DPE = 32
-    elif Lq == 192:
-        BLOCK_DMODEL = 128
-        BLOCK_DPE = 64
-    else:
-        BLOCK_DMODEL = triton.next_power_of_2(Lq)
-        BLOCK_DPE = 0
-
+    BLOCK_DMODEL = triton.next_power_of_2(Lq)
     BLOCK_DV = triton.next_power_of_2(Lv)
 
     # Determine BLOCK_M, BLOCK_N, and num_warps based on hardware (CUDA)
@@ -78,121 +65,13 @@ def _get_block_sizes_for_extend_attention(Lq: int, Lv: int):
 
     num_warps = 4 if Lq <= 64 else 8
 
-    return BLOCK_DMODEL, BLOCK_DPE, BLOCK_DV, BLOCK_M, BLOCK_N, num_warps
+    return BLOCK_DMODEL, BLOCK_DV, BLOCK_M, BLOCK_N, num_warps
 
 
-@triton.jit
-def tanh(x):
-    # Tanh is just a scaled sigmoid
-    return 2 * tl.sigmoid(2 * x) - 1
-
-
-@triton.jit
-def _copy_unified_indices_kernel(
-    # Input buffers
-    prefix_kv_indptr,
-    prefix_kv_indices,
-    extend_start_loc,
-    extend_seq_lens,
-    extend_kv_indices,
-    unified_kv_indptr,
-    # Output buffer
-    unified_kv_indices,
-    # Size
-    bs,
-):
-    """
-    Triton kernel to copy indices to unified buffer (parallel per sequence).
-    Each thread block processes one sequence with vectorized loads/stores.
-    """
-    pid = tl.program_id(0)
-
-    if pid >= bs:
-        return
-
-    # Load sequence info
-    prefix_start = tl.load(prefix_kv_indptr + pid)
-    prefix_end = tl.load(prefix_kv_indptr + pid + 1)
-    extend_start = tl.load(extend_start_loc + pid)
-    extend_len = tl.load(extend_seq_lens + pid)
-
-    prefix_len = prefix_end - prefix_start
-    unified_start = tl.load(unified_kv_indptr + pid)
-
-    # Copy indices in vectorized chunks
-    BLOCK_SIZE: tl.constexpr = 128
-
-    # Process prefix indices
-    for block_start in range(0, prefix_len, BLOCK_SIZE):
-        offs = block_start + tl.arange(0, BLOCK_SIZE)
-        mask = offs < prefix_len
-
-        src_idx = prefix_start + offs
-        dst_idx = unified_start + offs
-
-        vals = tl.load(prefix_kv_indices + src_idx, mask=mask, other=0)
-        tl.store(unified_kv_indices + dst_idx, vals, mask=mask)
-
-    # Process extend indices
-    for block_start in range(0, extend_len, BLOCK_SIZE):
-        offs = block_start + tl.arange(0, BLOCK_SIZE)
-        mask = offs < extend_len
-
-        src_idx = extend_start + offs
-        dst_idx = unified_start + prefix_len + offs
-
-        vals = tl.load(extend_kv_indices + src_idx, mask=mask, other=0)
-        tl.store(unified_kv_indices + dst_idx, vals, mask=mask)
-
-
-def build_unified_kv_indices(
-    prefix_kv_indptr: torch.Tensor,
-    prefix_kv_indices: torch.Tensor,
-    extend_start_loc: torch.Tensor,
-    extend_seq_lens: torch.Tensor,
-    extend_kv_indices: torch.Tensor,
-    bs: int,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Build unified KV indices efficiently:
-    - Use PyTorch's optimized cumsum (NVIDIA CUB) for indptr
-    - Use Triton kernel for parallel index copying
-
-    Returns:
-        (unified_kv_indptr, unified_kv_indices, prefix_lens)
-    """
-    device = prefix_kv_indptr.device
-
-    prefix_lens = prefix_kv_indptr[1 : bs + 1] - prefix_kv_indptr[:bs]
-
-    # Create unified_kv_indptr avoiding direct assignment (for CUDA graph compatibility)
-    unified_lens = prefix_lens + extend_seq_lens[:bs]
-    unified_kv_indptr = torch.cat(
-        [
-            torch.zeros(1, dtype=torch.int32, device=device),
-            torch.cumsum(unified_lens, dim=0),
-        ]
-    )
-
-    max_unified_len = len(prefix_kv_indices) + len(extend_kv_indices)
-
-    unified_kv_indices = torch.empty(max_unified_len, dtype=torch.int64, device=device)
-
-    # Launch Triton kernel for parallel index copying
-    _copy_unified_indices_kernel[(bs,)](
-        prefix_kv_indptr,
-        prefix_kv_indices,
-        extend_start_loc,
-        extend_seq_lens,
-        extend_kv_indices,
-        unified_kv_indptr,
-        unified_kv_indices,
-        bs,
-    )
-
-    return unified_kv_indptr, unified_kv_indices, prefix_lens
-
-
+# Triton kernel:extend(prefill+KV cache)注意力前向主体,支持 custom_mask(树掩码).
+# 两段结构:stage 1 扫前缀 KV(分页,经 kv_indices gather),stage 2 扫本次 extend
+# 的新 token(连续内存,套 custom_mask)。两段共用同一组 acc/deno/e_max,
+# online softmax 边扫边归并,不物化 [L, past+L] 注意力矩阵。
 @triton.jit
 def _fwd_kernel(
     Q_Extend,
@@ -206,8 +85,6 @@ def _fwd_kernel(
     kv_indices,
     mask_ptr,
     mask_indptr,
-    sink_ptr,
-    window_kv_offset_ptr,
     sm_scale,
     kv_group_num,
     stride_qbs,
@@ -222,21 +99,15 @@ def _fwd_kernel(
     stride_buf_kh,
     stride_buf_vbs,
     stride_buf_vh,
-    SLIDING_WINDOW_SIZE: tl.constexpr,
-    logit_cap: tl.constexpr,
-    xai_temperature_len: tl.constexpr,
     Lq: tl.constexpr,
     Lv: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
-    BLOCK_DPE: tl.constexpr,
     BLOCK_DV: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     USE_CUSTOM_MASK: tl.constexpr,
     IS_CAUSAL: tl.constexpr,
     SKIP_PREFIX_CUSTOM_MASK: tl.constexpr,
-    STORE_TRANSPOSE: tl.constexpr,
-    HAS_SINK: tl.constexpr,
 ):
     cur_seq = tl.program_id(0)
     cur_head = tl.program_id(1)
@@ -252,11 +123,6 @@ def _fwd_kernel(
     if USE_CUSTOM_MASK:
         cur_seq_mask_start_idx = tl.load(mask_indptr + cur_seq)
 
-    # For SWA, we should only load the mask in the sliding window
-    window_kv_offset = 0
-    if USE_CUSTOM_MASK and SLIDING_WINDOW_SIZE > 0:
-        window_kv_offset = tl.load(window_kv_offset_ptr + cur_seq)
-
     offs_d = tl.arange(0, BLOCK_DMODEL)
     offs_dv = tl.arange(0, BLOCK_DV)
     offs_m = tl.arange(0, BLOCK_M)
@@ -264,15 +130,6 @@ def _fwd_kernel(
 
     mask_d = offs_d < Lq
     mask_dv = offs_dv < Lv
-
-    if xai_temperature_len > 0:
-        offs_qidx = cur_seq_len_prefix + cur_block_m * BLOCK_M + offs_m
-        xai_temperature_scale = 1.0 / tl.log2(float(xai_temperature_len))
-        xai_temperature_reg = tl.where(
-            offs_qidx > xai_temperature_len,
-            tl.log2(offs_qidx.to(tl.float32)) * xai_temperature_scale,
-            1.0,
-        )
 
     offs_q = (
         (cur_seq_extend_start_idx + cur_block_m * BLOCK_M + offs_m[:, None])
@@ -283,16 +140,6 @@ def _fwd_kernel(
     q = tl.load(
         Q_Extend + offs_q, mask=(mask_m[:, None]) & (mask_d[None, :]), other=0.0
     )
-
-    if BLOCK_DPE > 0:
-        offs_dpe = BLOCK_DMODEL + tl.arange(0, BLOCK_DPE)
-        offs_qpe = (
-            (cur_seq_extend_start_idx + cur_block_m * BLOCK_M + offs_m[:, None])
-            * stride_qbs
-            + cur_head * stride_qh
-            + offs_dpe[None, :]
-        )
-        qpe = tl.load(Q_Extend + offs_qpe, mask=mask_m[:, None], other=0.0)
 
     # stage 1: compute scores with prefix
     offs_n = tl.arange(0, BLOCK_N)
@@ -305,30 +152,23 @@ def _fwd_kernel(
         start_n = tl.multiple_of(start_n, BLOCK_N)
         mask_n = (start_n + offs_n) < cur_seq_len_prefix
 
+        # 前缀默认全可见;SKIP_PREFIX_CUSTOM_MASK=True(树 verify 的用法)时
+        # custom_mask 只描述树内 L×L 段,前缀段不查 mask。
         final_mask = mask_m[:, None] & mask_n[None, :]
         if USE_CUSTOM_MASK and not SKIP_PREFIX_CUSTOM_MASK:
             custom_mask = tl.load(
                 mask_ptr
                 + cur_seq_mask_start_idx
-                + (cur_block_m * BLOCK_M + offs_m[:, None])
-                * (cur_seq_len + window_kv_offset)
-                + window_kv_offset
+                + (cur_block_m * BLOCK_M + offs_m[:, None]) * cur_seq_len
                 + start_n
                 + offs_n[None, :],
                 mask=(mask_m[:, None] & mask_n[None, :]),
                 other=0,
             )
             final_mask &= custom_mask
-        if SLIDING_WINDOW_SIZE > 0:
-            # Add mask where q_id <= kv_id + sliding_window_size
-            # q_id = prefix_len + cur_m, kv_id = cur_n
-            window_mask = (
-                cur_seq_len_prefix + cur_block_m * BLOCK_M + offs_m[:, None]
-            ) <= (start_n + offs_n[None, :] + SLIDING_WINDOW_SIZE)
-            final_mask &= window_mask
 
         SKIP_TILE = False
-        if (USE_CUSTOM_MASK and not SKIP_PREFIX_CUSTOM_MASK) or SLIDING_WINDOW_SIZE > 0:
+        if USE_CUSTOM_MASK and not SKIP_PREFIX_CUSTOM_MASK:
             SKIP_TILE = tl.max(tl.max(final_mask.to(tl.int32), axis=1), axis=0) == 0
 
         if not SKIP_TILE:
@@ -351,25 +191,7 @@ def _fwd_kernel(
             )
 
             qk = tl.dot(q.to(k.dtype), k)
-            if BLOCK_DPE > 0:
-                offs_kpe = (
-                    offs_kv_loc[None, :] * stride_buf_kbs
-                    + cur_kv_head * stride_buf_kh
-                    + offs_dpe[:, None]
-                )
-                kpe = tl.load(
-                    K_Buffer + offs_kpe,
-                    mask=mask_n[None, :],
-                    other=0.0,
-                )
-                qk += tl.dot(qpe.to(kpe.dtype), kpe)
             qk *= sm_scale
-
-            if logit_cap > 0:
-                qk = logit_cap * tanh(qk / logit_cap)
-
-            if xai_temperature_len > 0:
-                qk *= xai_temperature_reg[:, None]
 
             qk = tl.where(final_mask, qk, float("-inf"))
 
@@ -412,9 +234,7 @@ def _fwd_kernel(
             custom_mask = tl.load(
                 mask_ptr
                 + cur_seq_mask_start_idx
-                + (cur_block_m * BLOCK_M + offs_m[:, None])
-                * (cur_seq_len + window_kv_offset)
-                + window_kv_offset
+                + (cur_block_m * BLOCK_M + offs_m[:, None]) * cur_seq_len
                 + cur_seq_len_prefix
                 + start_n
                 + offs_n[None, :],
@@ -433,15 +253,8 @@ def _fwd_kernel(
             mask_non_causal = mask_m[:, None] & mask_n[None, :]
             final_mask &= mask_non_causal
 
-        if SLIDING_WINDOW_SIZE > 0:
-            # Add mask where q_id <= kv_id + sliding_window_size
-            window_mask = (cur_block_m * BLOCK_M + offs_m[:, None]) <= (
-                start_n + offs_n[None, :] + SLIDING_WINDOW_SIZE
-            )
-            final_mask &= window_mask
-
         SKIP_TILE = False
-        if USE_CUSTOM_MASK or SLIDING_WINDOW_SIZE > 0:
+        if USE_CUSTOM_MASK:
             SKIP_TILE = tl.max(tl.max(final_mask.to(tl.int32), axis=1), axis=0) == 0
 
         if not SKIP_TILE:
@@ -452,30 +265,14 @@ def _fwd_kernel(
                 + offs_d[:, None]
             )
             k = tl.load(
-                K_Extend + offs_k, mask=(mask_n[None, :]) & (mask_d[:, None]), other=0.0
+                K_Extend + offs_k,
+                mask=(mask_n[None, :]) & (mask_d[:, None]),
+                other=0.0,
             )
 
             qk = tl.dot(q, k, out_dtype=tl.float32)
-            if BLOCK_DPE > 0:
-                offs_kpe = (
-                    (cur_seq_extend_start_idx + start_n + offs_n[None, :]) * stride_kbs
-                    + cur_kv_head * stride_kh
-                    + offs_dpe[:, None]
-                )
-                kpe = tl.load(
-                    K_Extend + offs_kpe,
-                    mask=mask_n[None, :],
-                    other=0.0,
-                )
-                qk += tl.dot(qpe, kpe)
 
             qk *= sm_scale
-
-            if logit_cap > 0:
-                qk = logit_cap * tanh(qk / logit_cap)
-
-            if xai_temperature_len > 0:
-                qk *= xai_temperature_reg[:, None]
 
             qk = tl.where(final_mask, qk, float("-inf"))
 
@@ -500,28 +297,17 @@ def _fwd_kernel(
 
             e_max = n_e_max
 
-    if HAS_SINK:
-        cur_sink = tl.load(sink_ptr + cur_head)
-        deno += tl.exp(cur_sink - e_max)
-
     offs_o = (
         (cur_seq_extend_start_idx + cur_block_m * BLOCK_M + offs_m[:, None])
         * stride_obs
         + cur_head * stride_oh
         + offs_dv[None, :]
     )
-    if STORE_TRANSPOSE:
-        tl.store(
-            O_Extend + offs_o.T,
-            (acc / deno[:, None]).T,
-            mask=(mask_m[:, None] & mask_dv[None, :]).T,
-        )
-    else:
-        tl.store(
-            O_Extend + offs_o,
-            acc / deno[:, None],
-            mask=mask_m[:, None] & mask_dv[None, :],
-        )
+    tl.store(
+        O_Extend + offs_o,
+        acc / deno[:, None],
+        mask=mask_m[:, None] & mask_dv[None, :],
+    )
 
 
 def extend_attention_fwd(
@@ -539,12 +325,7 @@ def extend_attention_fwd(
     mask_indptr,
     max_len_extend,
     sm_scale=None,
-    logit_cap=0.0,
     skip_prefix_custom_mask=True,
-    sliding_window_size=-1,
-    sinks=None,
-    window_kv_offsets=None,
-    xai_temperature_len=-1,
 ):
     """
     q_extend, k_extend, v_extend, o_extend: contiguous tensors
@@ -558,7 +339,7 @@ def extend_attention_fwd(
     )
 
     # Get block sizes and configuration
-    BLOCK_DMODEL, BLOCK_DPE, BLOCK_DV, BLOCK_M, BLOCK_N, num_warps = (
+    BLOCK_DMODEL, BLOCK_DV, BLOCK_M, BLOCK_N, num_warps = (
         _get_block_sizes_for_extend_attention(Lq, Lv)
     )
 
@@ -569,8 +350,6 @@ def extend_attention_fwd(
     USE_CUSTOM_MASK = custom_mask is not None
     # Skip custom mask for prefix part
     SKIP_PREFIX_CUSTOM_MASK = skip_prefix_custom_mask
-
-    HAS_SINK = sinks is not None
 
     grid = (batch_size, head_num, triton.cdiv(max_len_extend, BLOCK_M))
     num_stages = 1
@@ -587,8 +366,6 @@ def extend_attention_fwd(
         kv_indices,
         custom_mask,
         mask_indptr,
-        sinks,
-        window_kv_offsets,
         sm_scale,
         kv_group_num,
         q_extend.stride(0),
@@ -603,11 +380,7 @@ def extend_attention_fwd(
         k_buffer.stride(1),
         v_buffer.stride(0),
         v_buffer.stride(1),
-        SLIDING_WINDOW_SIZE=sliding_window_size,
-        logit_cap=logit_cap,
-        xai_temperature_len=xai_temperature_len,
         BLOCK_DMODEL=BLOCK_DMODEL,
-        BLOCK_DPE=BLOCK_DPE,
         BLOCK_DV=BLOCK_DV,
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
@@ -616,8 +389,6 @@ def extend_attention_fwd(
         USE_CUSTOM_MASK=USE_CUSTOM_MASK,
         IS_CAUSAL=is_causal,
         SKIP_PREFIX_CUSTOM_MASK=SKIP_PREFIX_CUSTOM_MASK,
-        HAS_SINK=HAS_SINK,
-        STORE_TRANSPOSE=False,
         num_warps=num_warps,
         num_stages=num_stages,
     )
