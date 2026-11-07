@@ -51,6 +51,12 @@ def main() -> None:
         default="Speculative decoding accelerates LLM inference by",
     )
     p.add_argument("--max-new-tokens", type=int, default=64)
+    p.add_argument(
+        "--refresh",
+        action="store_true",
+        help="每个树节点用 prefix+path 重算 target hidden(透传根 hidden 的对照;"
+        "每节点一次 target 前向,很慢,仅诊断接受率瓶颈用)",
+    )
     args = p.parse_args()
 
     # 树/verify 配置固定为官方推荐形态:topk=4, num_steps=4, 24 节点, extend 树 verify 自动选后端
@@ -86,7 +92,9 @@ def main() -> None:
         verify_mode=verify_mode,
         verify_attn_backend=verify_attn_backend,
     )
-    gen = Eagle1Generator(target, cfg, draft_topk_fn, refresh_target_each_node=False)
+    gen = Eagle1Generator(
+        target, cfg, draft_topk_fn, refresh_target_each_node=args.refresh
+    )
 
     # base 模型无对话格式,直接纯编码 prompt
     input_ids = tok(args.prompt, return_tensors="pt")["input_ids"].to(device)
@@ -148,6 +156,7 @@ def main() -> None:
 
     rec = (
         f"[eagle1] target={target_used} draft={args.eagle1_draft} "
+        f"refresh={args.refresh} "
         f"verify={verify_mode}(backend={verify_attn_backend}) "
         f"topk={topk} num_steps={num_steps} max_nodes={max_tree_nodes} dtype=bfloat16\n"
         f"  new_tokens={n_new}  rounds={gen.n_rounds}  accept/round={accept_per_round:.2f}\n"

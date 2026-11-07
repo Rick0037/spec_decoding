@@ -148,13 +148,13 @@ def expand_draft_tree(
         position_index, dep, hidden, path_p = que.popleft()
         if dep >= cfg.num_steps:
             continue
-        # TODO by ruixuan 不要重算, 太不好了, 啥用没有了
-        # hidden = _expand_hidden(
-        #     parent_hidden,
-        #     path_p,
-        #     target_hidden_refresh=target_hidden_refresh,
-        #     initial_prefix_ids=initial_prefix_ids,
-        # )
+        # refresh 给定:用 prefix+path 重算该位置的真实 target hidden 再喂 draft
+        hidden = _expand_hidden(
+            hidden,
+            path_p,
+            target_hidden_refresh=target_hidden_refresh,
+            initial_prefix_ids=initial_prefix_ids,
+        )
         token_id = torch.tensor([[path_p[-1]]], device=device, dtype=torch.long)
         # 对paris作spec K,对the作spec K
         child_ids, _ = draft_topk_fn(hidden, token_id)
