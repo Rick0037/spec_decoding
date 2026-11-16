@@ -18,6 +18,12 @@ target(refresh_target_each_node=False),适合大模型。
 跑法:
     PYTHONPATH=. python3 -m spec_decoding.eagle3_sgl.example.run_eagle3_sgl_llama31 \
         --max-new-tokens 96 --topk 4 --num-steps 5 --max-tree-nodes 32
+
+new: 
+ HF_HUB_OFFLINE=1 HF_HOME=/root/autodl-tmp/hf_cache PYTHONPATH=. .venv/bin/python \
+    -m spec_decoding.eagle3_sgl.example.run_eagle3_sgl_llama31 \
+    --target NousResearch/Meta-Llama-3.1-8B-Instruct
+
 """
 
 from __future__ import annotations
