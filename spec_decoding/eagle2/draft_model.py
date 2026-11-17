@@ -174,6 +174,7 @@ class Eagle2DraftModel(nn.Module):
             device = embed.weight.device
         if dtype is None:
             dtype = embed.weight.dtype
+        print(f"target device is ${device}, dtype is ${dtype}")
         fk = {"device": device, "dtype": dtype}
 
         # fc:把 [token_emb ; target_hidden](2H)融合回 H —— EAGLE 的 feature 接入点.

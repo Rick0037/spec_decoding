@@ -29,26 +29,40 @@ def _load_target(target_id: str, device, dtype):
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     print(f"[eagle2-llama2] loading target {target_id} ...", flush=True)
-    tok = AutoTokenizer.from_pretrained(target_id)
+    tokenizer = AutoTokenizer.from_pretrained(target_id)
     model = (
         AutoModelForCausalLM.from_pretrained(target_id, torch_dtype=dtype)
         .to(device)
         .eval()
     )
     print(f"[eagle2-llama2] target ready: {target_id}", flush=True)
-    return tok, model, target_id
+    return tokenizer, model, target_id
+
+
+def _first_divergence(reference_tokens, other_tokens):
+    """返回 (共同前缀长度, 首个不一致位置);位置为 -1 表示完全一致。"""
+    common_length = min(len(reference_tokens), len(other_tokens))
+    divergence_index = next(
+        (
+            index
+            for index in range(common_length)
+            if reference_tokens[index] != other_tokens[index]
+        ),
+        -1,
+    )
+    return common_length, divergence_index
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Real EAGLE2 on Llama-2-7B (base)")
-    p.add_argument("--target", default="/root/autodl-tmp/code/LlmQT/Llama-2-7b-ms")
-    p.add_argument("--eagle-draft", default="yuhuili/EAGLE-llama2-chat-7B")
-    p.add_argument(
+    parser = argparse.ArgumentParser(description="Real EAGLE2 on Llama-2-7B (base)")
+    parser.add_argument("--target", default="/root/autodl-tmp/code/LlmQT/Llama-2-7b-ms")
+    parser.add_argument("--eagle-draft", default="yuhuili/EAGLE-llama2-chat-7B")
+    parser.add_argument(
         "--prompt",
         default="Speculative decoding accelerates LLM inference by",
     )
-    p.add_argument("--max-new-tokens", type=int, default=64)
-    args = p.parse_args()
+    parser.add_argument("--max-new-tokens", type=int, default=64)
+    command_line_args = parser.parse_args()
 
     # EAGLE2 官方推荐形态:cumulative 动态树,num_steps=5 / 32 节点
     # (比 EAGLE1 的 4/24 略大,体现动态剪枝的节点利用率优势)
@@ -58,7 +72,7 @@ def main() -> None:
         "full_model_tree",
         "auto",
     )
-    perf_log = "perf.log"
+    perf_log_path = "perf.log"
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.bfloat16
@@ -72,118 +86,151 @@ def main() -> None:
         make_eagle2_draft_topk_fn,
     )
 
-    tok, target, target_used = _load_target(args.target, device, dtype)
+    tokenizer, target, target_repo = _load_target(
+        command_line_args.target, device, dtype
+    )
 
     # 官方 EAGLE draft 权重(单 bin);与 EAGLE1 同一份 checkpoint,结构通用
-    draft_bin = hf_hub_download(args.eagle_draft, "pytorch_model.bin")
-    draft = build_eagle2_draft(
-        target, num_layers=1, draft_weights_path=draft_bin, device=device, dtype=dtype
+    draft_weights_path = hf_hub_download(
+        command_line_args.eagle_draft, "pytorch_model.bin"
     )
-    draft_topk_fn = make_eagle2_draft_topk_fn(draft, topk=topk)
 
-    cfg = Eagle2TreeConfig(
-        topk=topk,
-        num_steps=num_steps,
-        max_tree_nodes=max_tree_nodes,
-        tree_expand_mode=tree_expand_mode,
-        verify_mode=verify_mode,
-        verify_attn_backend=verify_attn_backend,
+    draft_model = build_eagle2_draft(
+        target,
+        num_layers=1,
+        draft_weights_path=draft_weights_path,
+        device=device,
+        dtype=dtype,
+    )
+    # 把 draft model 包装成 topk 回调
+    draft_topk_fn = make_eagle2_draft_topk_fn(draft_model, topk=topk)
+
+    generator_config = Eagle2TreeConfig(
+        topk=topk,  # 每个节点展开的候选数
+        num_steps=num_steps,  # 树的最大深度
+        max_tree_nodes=max_tree_nodes,  # 整棵树最多保留的节点数
+        tree_expand_mode=tree_expand_mode,  # cumulative(eagle2) 或 static(eagle1)
+        verify_mode=verify_mode,  # 一次树状 verify 或逐路径多次 verify
+        verify_attn_backend=verify_attn_backend,  # verify 用的 attention 后端
     )
     # 大模型上不逐节点刷新 target(只在根取一次 hidden),避免 O(树节点) 次 target 前向
-    gen = Eagle2Generator(target, cfg, draft_topk_fn, refresh_target_each_node=False)
+    generator = Eagle2Generator(
+        target, generator_config, draft_topk_fn, refresh_target_each_node=False
+    )
 
     # base 模型无对话格式,直接纯编码 prompt
-    input_ids = tok(args.prompt, return_tensors="pt")["input_ids"].to(device)
-    plen = int(input_ids.shape[1])
-    eos = tok.eos_token_id
+    input_ids = tokenizer(command_line_args.prompt, return_tensors="pt")[
+        "input_ids"
+    ].to(device)
+    prefix_length = int(input_ids.shape[1])
+    eos_token_id = tokenizer.eos_token_id
 
     # 贪心基线:干净整段前向(use_cache=False)逐步 argmax,与 verify 数值同源
     with torch.inference_mode():
-        cur = input_ids.clone()
-        greedy_ids = []
-        for _ in range(args.max_new_tokens):
-            nt = int(target(cur, use_cache=False).logits[0, -1].argmax())
-            greedy_ids.append(nt)
-            cur = torch.cat([cur, torch.tensor([[nt]], device=device)], dim=1)
-            if eos is not None and nt == eos:
+        greedy_input_ids = input_ids.clone()
+        greedy_generated_tokens = []
+        for _ in range(command_line_args.max_new_tokens):
+            next_token_id = int(
+                target(greedy_input_ids, use_cache=False).logits[0, -1].argmax()
+            )
+            greedy_generated_tokens.append(next_token_id)
+            greedy_input_ids = torch.cat(
+                [greedy_input_ids, torch.tensor([[next_token_id]], device=device)],
+                dim=1,
+            )
+            if eos_token_id is not None and next_token_id == eos_token_id:
                 break
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
-    t0 = time.time()
-    out_ids = gen.generate(
-        input_ids, max_new_tokens=args.max_new_tokens, eos_token_id=eos
+    speculative_start_time = time.time()
+    speculative_output_ids = generator.generate(
+        input_ids,
+        max_new_tokens=command_line_args.max_new_tokens,
+        eos_token_id=eos_token_id,
     )
     if torch.cuda.is_available():
         torch.cuda.synchronize()
-    dt = time.time() - t0
-    spec_cont = out_ids[0, plen:].tolist()
+    speculative_elapsed_seconds = time.time() - speculative_start_time
+    speculative_generated_tokens = speculative_output_ids[0, prefix_length:].tolist()
 
-    n_new = len(spec_cont)
-    accept_per_round = gen.n_accepted_tokens / max(1, gen.n_rounds)
+    num_generated_tokens = len(speculative_generated_tokens)
+    accepted_tokens_per_round = generator.n_accepted_tokens / max(1, generator.n_rounds)
 
+    # HF 标准贪心(use_cache=True)作为耗时基线
     if torch.cuda.is_available():
         torch.cuda.synchronize()
-    t1 = time.time()
+    baseline_start_time = time.time()
     with torch.inference_mode():
-        bg = target.generate(
+        baseline_output_ids = target.generate(
             input_ids,
-            max_new_tokens=args.max_new_tokens,
+            max_new_tokens=command_line_args.max_new_tokens,
             do_sample=False,
             num_beams=1,
             use_cache=True,
-            pad_token_id=eos,
+            pad_token_id=eos_token_id,
         )
     if torch.cuda.is_available():
         torch.cuda.synchronize()
-    base_dt = time.time() - t1
-    base_cont = bg[0, plen:].tolist()
-    base_new = len(base_cont)
+    baseline_elapsed_seconds = time.time() - baseline_start_time
+    baseline_generated_tokens = baseline_output_ids[0, prefix_length:].tolist()
+    baseline_num_generated_tokens = len(baseline_generated_tokens)
 
-    def _first_div(a, b):
-        mm = min(len(a), len(b))
-        d = next((i for i in range(mm) if a[i] != b[i]), -1)
-        return mm, d
+    hf_common_length, hf_divergence_index = _first_divergence(
+        speculative_generated_tokens, baseline_generated_tokens
+    )
+    greedy_common_length, greedy_divergence_index = _first_divergence(
+        speculative_generated_tokens, greedy_generated_tokens
+    )
+    is_lossless = greedy_divergence_index == -1  # 与干净贪心一致即为无损
 
-    m_hf, div_hf = _first_div(spec_cont, base_cont)
-    m_cl, div_cl = _first_div(spec_cont, greedy_ids)
-    lossless = div_cl == -1  # 与干净贪心一致即为无损
-
-    rec = (
-        f"[eagle2] target={target_used} draft={args.eagle_draft} "
+    report = (
+        f"[eagle2] target={target_repo} draft={command_line_args.eagle_draft} "
         f"verify={verify_mode}(backend={verify_attn_backend}) tree={tree_expand_mode} "
         f"topk={topk} num_steps={num_steps} max_nodes={max_tree_nodes} dtype=bfloat16\n"
-        f"  new_tokens={n_new}  rounds={gen.n_rounds}  accept/round={accept_per_round:.2f}\n"
-        f"  wall={dt:.2f}s  spec_tok/s={n_new / dt:.2f}\n"
-        f"  lossless(vs clean-greedy)={lossless}  [vs clean: first_div={div_cl}/{m_cl}; "
-        f"vs HF cached: first_div={div_hf}/{m_hf}]\n"
-        f"  baseline(HF greedy) new_tokens={base_new}  wall={base_dt:.2f}s  "
-        f"base_tok/s={base_new / base_dt:.2f}  speedup={(n_new/dt)/(base_new/base_dt):.2f}x\n"
+        f"  new_tokens={num_generated_tokens}  rounds={generator.n_rounds}  "
+        f"accept/round={accepted_tokens_per_round:.2f}\n"
+        f"  wall={speculative_elapsed_seconds:.2f}s  "
+        f"spec_tok/s={num_generated_tokens / speculative_elapsed_seconds:.2f}\n"
+        f"  lossless(vs clean-greedy)={is_lossless}  "
+        f"[vs clean: first_div={greedy_divergence_index}/{greedy_common_length}; "
+        f"vs HF cached: first_div={hf_divergence_index}/{hf_common_length}]\n"
+        f"  baseline(HF greedy) new_tokens={baseline_num_generated_tokens}  "
+        f"wall={baseline_elapsed_seconds:.2f}s  "
+        f"base_tok/s={baseline_num_generated_tokens / baseline_elapsed_seconds:.2f}  "
+        f"speedup={(num_generated_tokens/speculative_elapsed_seconds)/(baseline_num_generated_tokens/baseline_elapsed_seconds):.2f}x\n"
     )
-    mshow = min(len(greedy_ids), n_new)
+    num_compare_tokens = min(len(greedy_generated_tokens), num_generated_tokens)
     print("\n==================== EAGLE2 (Llama-2-7B base) ====================")
-    print(rec, end="")
+    print(report, end="")
     print(
         "[greedy]",
-        tok.decode(torch.tensor(greedy_ids[:mshow]), skip_special_tokens=True),
+        tokenizer.decode(
+            torch.tensor(greedy_generated_tokens[:num_compare_tokens]),
+            skip_special_tokens=True,
+        ),
     )
     print(
         "[eagle2]",
-        tok.decode(torch.tensor(spec_cont[:mshow]), skip_special_tokens=True),
+        tokenizer.decode(
+            torch.tensor(speculative_generated_tokens[:num_compare_tokens]),
+            skip_special_tokens=True,
+        ),
     )
     print("===================================================================")
 
-    with open(perf_log, "a") as f:
-        f.write(time.strftime("%Y-%m-%d %H:%M:%S\n"))
-        f.write(rec)
-        f.write("\n")
-    print(f"[eagle2-llama2] perf appended to {os.path.abspath(perf_log)}")
-    if lossless:
+    with open(perf_log_path, "a") as log_file:
+        log_file.write(time.strftime("%Y-%m-%d %H:%M:%S\n"))
+        log_file.write(report)
+        log_file.write("\n")
+    print(f"[eagle2-llama2] perf appended to {os.path.abspath(perf_log_path)}")
+    if is_lossless:
         print("[eagle2-llama2] OK (lossless vs clean greedy)")
     else:
         print(
-            f"[eagle2-llama2] FAIL: diverged from clean greedy at idx {div_cl} "
-            f"(accept/round={accept_per_round:.2f})"
+            f"[eagle2-llama2] FAIL: diverged from clean greedy at idx "
+            f"{greedy_divergence_index} "
+            f"(accept/round={accepted_tokens_per_round:.2f})"
         )
 
 

@@ -243,10 +243,10 @@ class Eagle2Generator:
             draft_res = expand_draft_tree_bfs(
                 self.cfg,
                 h_root,
-                last_token_id,
+                last_token_id,  # * prompt last token
                 self.draft_topk_fn,
                 target_hidden_refresh=_refresh,
-                initial_prefix_ids=_init_prefix,
+                initial_prefix_ids=_init_prefix, #* prompt
             )
         else:  # eagle2 风格,求得经过一轮steps步spec fwd后经累积概率剪枝的topk
             draft_res = expand_draft_tree_topk(
@@ -362,8 +362,14 @@ class Eagle2Generator:
         past = out0.past_key_values
         # out_ids 之后那一位的 target logits(extend verify 的 root 接受参照)+ 末 token 的 hidden
         # (draft 树根条件).从同一次前向取出,省掉每轮额外的整段前缀 forward.
-        recovery_logits = out0.logits[0, -1]
+        recovery_logits = out0.logits[0, -1]  # -> last word voc_size
+        # * (Pdb) out0.logits.shape -> [batch_size, seq_len, voc_size]
+        # * torch.Size([1, 12, 32000])
         root_hidden = out0.hidden_states[self.cfg.hidden_layer_index][:, -1, :]
+        # * root_hidden -> last word hidden_size
+        # import pdb
+
+        # pdb.set_trace()
 
         while new_tok < max_new_tokens:
             if eos_token_id is not None and out_ids[0, -1].item() == eos_token_id:
@@ -373,9 +379,19 @@ class Eagle2Generator:
             append, _, _, _ = self.generate_step_payload(
                 out_ids, past, last_t, recovery_logits, root_hidden
             )
-            # 把 append 重放进 target KV.注意:带 past 时 attention_mask 必须覆盖 [past + append]
-            # 全长,否则 append 不会 attend 到前缀 → out_sync.logits(recovery_logits)错.
-            # (extend verify 在 past 上临时 extend 后 crop,不污染 past;故 past 始终 = out_ids 的 KV.)
+            """
+            generate_step_payload 输入参数
+            out_ids -> before prefill all prompt 
+            past    -> prefill kv
+            last_t -> before prefill last token 
+            recovery_logits -> prefill finfish last word voc_size
+            root_hidden -> prefill last token hidden state
+            """
+            # 把本轮接受的 token(append)真正写进 KV cache。
+            # 为什么要再跑一次 target:verify 时是临时在 past 上算出整棵树的 KV,
+            # 算完就 crop 掉了,所以此刻 past 只到上一轮为止,本轮新 token 还没进去。
+            # attention_mask 必须覆盖"已有 KV 数 + 本轮新 token 数"的完整长度:
+            # 只给新 token 那几个位置,它们就看不到前面的历史,算出的 logits / hidden 全错。
             full_attn = torch.ones(
                 (1, int(past.get_seq_length()) + int(append.shape[1])),
                 device=device,

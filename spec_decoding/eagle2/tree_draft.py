@@ -187,6 +187,7 @@ def expand_draft_tree_topk(
     # * 从root 节点来看 吐出来了多少的token
     topk_ids, topk_scores = draft_topk_fn(root_hidden, root_parent_token_id)
     # * convert different score -> log
+    # * 每次仅仅截取 topk 个节点
     root_toks, root_lps = _topk_log_probs(topk_ids, topk_scores, K)
 
     # frontier = 当前 beam 上的活跃叶节点,
