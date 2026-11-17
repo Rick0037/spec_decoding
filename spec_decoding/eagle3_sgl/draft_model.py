@@ -712,7 +712,7 @@ def load_eagle3_draft_weights(
     d2t = None
     for k, v in src.items():
         base = k.split(".")[-1]
-        if base == "d2t" or k.endswith("d2t"):
+        if base == "d2t":
             d2t = v
             continue
         if "t2d" in k or "embed_tokens" in k:
@@ -764,10 +764,6 @@ def make_eagle3_sgl_draft_topk_fn(draft_model: Eagle3SglDraftModel, topk: int):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # 与 expand_draft_tree 约定一致:parent_token 通常shape是 [B=batchsize,1],acts 是根条件即低中高特征 [B,n*H]
         logits = draft_model(parent_token_id, acts)  # [B, V_draft 或 V_target]
-        k = min(topk, logits.shape[-1])
-        scores, idx = torch.topk(logits, k=k, dim=-1)
-        if draft_model.hot_token_id is not None:
-            idx = draft_model.hot_token_id[idx]  # draft id -> target id
-        return idx, scores
+        return draft_model.topk_target_ids(logits, topk)
 
     return fn

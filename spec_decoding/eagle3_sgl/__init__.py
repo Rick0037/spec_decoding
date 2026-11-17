@@ -47,10 +47,7 @@ __all__ = [
     "expand_draft_tree_topk",
     "expand_draft_tree_ar",
     "forward_target_eagle_acts",
-    "make_hidden_residual_draft_topk_fn",
     "tree_draft_to_verify_layout",
-    "resolve_verify_attn_backend",
-    "flash_attn_available",
     "triton_extend_available",
 ]
 
@@ -64,10 +61,6 @@ def __getattr__(name: str) -> Any:
         from .runner import Eagle3SglGenerator
 
         return Eagle3SglGenerator
-    if name == "make_hidden_residual_draft_topk_fn":
-        from .runner import make_hidden_residual_draft_topk_fn
-
-        return make_hidden_residual_draft_topk_fn
     if name in (
         "Eagle3SglDraftModel",
         "build_eagle3_sgl_draft",
@@ -77,12 +70,8 @@ def __getattr__(name: str) -> Any:
         from . import draft_model as dm
 
         return getattr(dm, name)
-    if name in (
-        "resolve_verify_attn_backend",
-        "flash_attn_available",
-        "triton_extend_available",
-    ):
-        from . import tree_verify_attn as tva
+    if name == "triton_extend_available":
+        from .tree_verify_attn import triton_extend_available
 
-        return getattr(tva, name)
+        return triton_extend_available
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

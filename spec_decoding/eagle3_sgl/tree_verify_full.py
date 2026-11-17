@@ -11,7 +11,7 @@ attention 对新 token 段施加树掩码(兄弟分支不可互看),再按 paren
 - full_tree_verify_extend:HF sdpa + [1,1,L,past+L] 4D 树 cross mask。
 - full_tree_verify_triton:SGLang extend_attention_fwd + custom_mask。
 
-verify 跑在 cache 副本/临时 extend 后 crop,不污染 runner 的 past;
+verify 临时扩展 cache,取完 logits 后 crop 还原,不污染 runner 的 past;
 root 接受用 recovery_logits(out_ids 之后那一位的 logits)。
 """
 
@@ -32,7 +32,17 @@ from .tree_verify_attn import (
     build_triton_tree_verify_metadata,
     tree_verify_triton_attention_context,
 )
-from .tree_verify_parallel import path_node_indices_root_to_leaf
+
+
+def path_node_indices_root_to_leaf(parent: List[int], leaf: int) -> List[int]:
+    """从根到 leaf 的节点下标(含叶)。"""
+    path: List[int] = []
+    node = leaf
+    while node >= 0:
+        path.append(node)
+        node = parent[node]
+    path.reverse()
+    return path
 
 
 def _decoder_stack(target_m: PreTrainedModel) -> nn.Module:
@@ -46,7 +56,7 @@ def _decoder_stack(target_m: PreTrainedModel) -> nn.Module:
 # -----------------------------------------------------------------------------
 # 复用前缀 KV cache 的extendverify(不重算前缀,只前向 L 个树节点).
 # HF sdpa + 4D 树 cross mask,或 triton extend kernel;前缀 KV 来自 runner 的 past,
-# 在 cache 副本上跑(不污染 past).root 接受用 recovery_logits(out_ids 之后那一位 logits).
+# 临时扩展 cache,取完 logits 后 crop 还原(不污染 past).root 接受用 recovery_logits.
 # 正确的 parent→child 接受:节点 i 的输出预测其子节点(避免 select_append 的 off-by-one).
 # -----------------------------------------------------------------------------
 def _crop_cache_back_to(past_key_values: Any, target_len: int) -> None:
@@ -112,8 +122,7 @@ def _select_append_root_child(
 
     best_path_nodes = path_node_indices_root_to_leaf(parent, best_leaf)
     best_path_tokens = [token_ids[i] for i in best_path_nodes]
-    append_list = best_path_tokens[:best_accepted_len] + [best_next_token]
-    return append_list
+    return best_path_tokens[:best_accepted_len] + [best_next_token]
 
 
 def _match_one_leaf_path(
@@ -155,7 +164,7 @@ def full_tree_verify_extend(
 ) -> List[int]:
     """复用前缀 KV 的 extend 树掩码 verify(HF sdpa + 4D 树 cross mask):只前向 L 个树节点。
 
-    在 cache 副本上跑(不污染 runner 的 past);root 接受用 recovery_logits。无损(与贪心一致)。
+    临时扩展 cache,取完 logits 后 crop 还原;root 接受用 recovery_logits。无损(与贪心一致)。
     """
     L = len(layout)
     dtype = next(target_m.parameters()).dtype
@@ -186,7 +195,7 @@ def full_tree_verify_triton(
     """extend verify 的 triton 版:
     复用前缀 KV,用 SGLang extend_attention_fwd + 树 custom_mask。
     数值与 full_tree_verify_extend 等价;
-    同样在 cache 副本上跑、root 接受用 root_logits
+    同样临时扩展 cache 并 crop 还原;root 接受用 root_logits
     """
     L = len(layout)  # draft_lens
     # (Pdb) layout

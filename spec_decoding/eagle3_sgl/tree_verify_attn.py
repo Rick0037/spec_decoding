@@ -32,16 +32,6 @@ _TRITON_SUPPORTED_ATTN = frozenset(
 )
 
 
-def flash_attn_available() -> bool:
-    """是否可用 FlashAttention(需装 flash_attn 且有 CUDA)."""
-    try:
-        import flash_attn  # noqa: F401
-
-        return torch.cuda.is_available()
-    except ImportError:
-        return False
-
-
 def triton_extend_available() -> bool:
     """是否可用 Triton extend attention kernel(需 CUDA + triton + 本包 kernel)."""
     if not torch.cuda.is_available():
@@ -56,35 +46,6 @@ def triton_extend_available() -> bool:
         return False
 
 
-def resolve_verify_attn_backend(
-    backend: Optional[str],
-    *,
-    topk: int,
-    layout_len: int,
-) -> str:
-    """
-    auto: topk==1 + FA → flash_attn;topk>1 + Triton → triton_tree;否则 eager。
-    """
-    b = (backend or "auto").lower()
-    if b == "auto":
-        if topk <= 1 and layout_len > 0 and flash_attn_available():
-            return "flash_attn"
-        if topk > 1 and layout_len > 0 and triton_extend_available():
-            return "triton_tree"
-        return "eager"
-    if b not in ("eager", "flash_attn", "triton_tree"):
-        raise ValueError(
-            "verify_attn_backend must be auto, eager, flash_attn, or triton_tree"
-        )
-    if b == "flash_attn" and not flash_attn_available():
-        raise RuntimeError("flash_attn requested but flash-attn is not available")
-    if b == "triton_tree" and not triton_extend_available():
-        raise RuntimeError(
-            "triton_tree requested but triton extend kernel is unavailable"
-        )
-    return b
-
-
 @dataclass
 class TritonTreeVerifyMetadata:
     """Indptr / indices / bool mask for extend_attention_fwd (batch=1)."""
@@ -95,7 +56,6 @@ class TritonTreeVerifyMetadata:
     custom_mask: torch.Tensor
     mask_indptr: torch.Tensor
     max_len_extend: int
-    past_len: int
     extend_len: int
 
 
@@ -136,21 +96,8 @@ def build_triton_tree_verify_metadata(
         custom_mask=custom_mask,
         mask_indptr=mask_indptr,
         max_len_extend=l_n,
-        past_len=int(past_len),
         extend_len=l_n,
     )
-
-
-def tree_custom_mask_bool_flat(
-    layout: TreeVerifyLayout,
-    past_len: int,
-    *,
-    device: torch.device,
-) -> torch.Tensor:
-    """Flat bool mask (True = allow), length L * (past_len + L)."""
-    return build_triton_tree_verify_metadata(
-        layout, past_len, device=device
-    ).custom_mask
 
 
 def _apply_rotary(

@@ -16,13 +16,8 @@ parent→child 接受 + recovery_logits root 接受),无损(与干净贪心一�
 target(refresh_target_each_node=False),适合大模型。
 
 跑法:
-    PYTHONPATH=. python3 -m spec_decoding.eagle3_sgl.example.run_eagle3_sgl_llama31 \
-        --max-new-tokens 96 --topk 4 --num-steps 5 --max-tree-nodes 32
-
-new: 
  HF_HUB_OFFLINE=1 HF_HOME=/root/autodl-tmp/hf_cache PYTHONPATH=. .venv/bin/python \
-    -m spec_decoding.eagle3_sgl.example.run_eagle3_sgl_llama31 \
-    --target NousResearch/Meta-Llama-3.1-8B-Instruct
+    -m spec_decoding.eagle3_sgl.example.run_eagle3_sgl_llama31
 
 """
 
@@ -59,56 +54,20 @@ def _load_target(target_id: str, device, dtype):
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Real EAGLE3 on Llama-3.1-8B")
-    p.add_argument("--target", default="meta-llama/Llama-3.1-8B-Instruct")
-    p.add_argument("--eagle3-draft", default="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")
-    p.add_argument(
+    parser = argparse.ArgumentParser(description="Real EAGLE3 on Llama-3.1-8B")
+    parser.add_argument("--target", default="meta-llama/Llama-3.1-8B-Instruct")
+    parser.add_argument(
+        "--eagle3-draft", default="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B"
+    )
+    parser.add_argument(
         "--prompt", default="Explain what speculative decoding is, in two sentences."
     )
-    p.add_argument("--max-new-tokens", type=int, default=96)
-    p.add_argument("--topk", type=int, default=8)
-    p.add_argument("--num-steps", type=int, default=8)
-    p.add_argument("--max-tree-nodes", type=int, default=64)
-    p.add_argument(
-        "--tree-expand-mode",
-        default="cumulative",
-        choices=["cumulative", "static"],
-        help="cumulative = EAGLE-2 累计 log 概率 beam 剪枝;static = EAGLE-1 静态 top-k BFS 树(AR draft 下忽略)",
-    )
-    p.add_argument(
-        "--verify-mode",
-        default="full_model_tree",
-        choices=["reference_paths", "full_model_tree"],
-    )
-    p.add_argument(
-        "--verify-attn-backend",
-        default="auto",
-        choices=["auto", "eager", "flash_attn", "triton_tree"],
-        help="full_model_tree extend verify attention: triton_tree uses Triton kernel; else sdpa",
-    )
-    p.add_argument("--no-chat-template", action="store_true")
-    p.add_argument("--device", default="cuda")
-    p.add_argument(
-        "--dtype", default="float16", choices=["float16", "bfloat16", "float32"]
-    )
-    p.add_argument(
-        "--no-autoregressive-draft",
-        dest="autoregressive_draft",
-        action="store_false",
-        help="禁用 KV-cache 自回归 draft(回退单 token draft_topk_fn)",
-    )
-    p.set_defaults(autoregressive_draft=True)
-    p.add_argument("--perf-log", default="perf.log")
-    args = p.parse_args()
+    parser.add_argument("--max-new-tokens", type=int, default=96)
+    command_line_args = parser.parse_args()
 
-    device = torch.device(
-        args.device if (torch.cuda.is_available() or args.device == "cpu") else "cpu"
-    )
-    dtype = {
-        "float16": torch.float16,
-        "bfloat16": torch.bfloat16,
-        "float32": torch.float32,
-    }[args.dtype]
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dtype = torch.float16
+    perf_log_path = "perf.log"
 
     from huggingface_hub import hf_hub_download
 
@@ -119,23 +78,23 @@ def main() -> None:
         make_eagle3_sgl_draft_topk_fn,
     )
 
-    tok, target, target_id = _load_target(args.target, device, dtype)
+    tok, target, target_id = _load_target(command_line_args.target, device, dtype)
     n_layers = int(target.config.num_hidden_layers)
 
     # eagle3 draft:取 config 的 draft_vocab_size,下载权重 bin,构造并加载真实权重
-    draft_cfg_path = hf_hub_download(args.eagle3_draft, "config.json")
+    draft_cfg_path = hf_hub_download(command_line_args.eagle3_draft, "config.json")
     draft_vocab_size = int(
         json.load(open(draft_cfg_path)).get("draft_vocab_size", 32000)
     )
-    draft_bin = hf_hub_download(args.eagle3_draft, "pytorch_model.bin")
+    draft_bin = hf_hub_download(command_line_args.eagle3_draft, "pytorch_model.bin")
 
     cfg = Eagle3SglConfig(
-        topk=args.topk,
-        num_steps=args.num_steps,
-        max_tree_nodes=args.max_tree_nodes,
-        tree_expand_mode=args.tree_expand_mode,
-        verify_mode=args.verify_mode,
-        verify_attn_backend=args.verify_attn_backend,
+        topk=8,
+        num_steps=8,
+        max_tree_nodes=64,
+        tree_expand_mode="cumulative",
+        verify_mode="full_model_tree",
+        verify_attn_backend="auto",
     )
     eagle_layers = cfg.resolve_eagle_layers(n_layers)  # 默认 [2, L//2, L-3]
     print(
@@ -152,7 +111,7 @@ def main() -> None:
         device=device,
         dtype=dtype,
     )
-    draft_topk_fn = make_eagle3_sgl_draft_topk_fn(draft, topk=args.topk)
+    draft_topk_fn = make_eagle3_sgl_draft_topk_fn(draft, topk=8)
 
     # 自回归 draft(KV + RoPE + feature 递归,对齐官方 EAGLE3 AR 推理)
     gen = Eagle3SglGenerator(
@@ -160,13 +119,13 @@ def main() -> None:
         cfg,
         draft_topk_fn,
         draft_model=draft,
-        autoregressive_draft=args.autoregressive_draft,
+        autoregressive_draft=True,
     )
 
     # 输入(instruct 模型套 chat template,否则 OOD)
-    if not args.no_chat_template and getattr(tok, "chat_template", None):
+    if getattr(tok, "chat_template", None):
         out = tok.apply_chat_template(
-            [{"role": "user", "content": args.prompt}],
+            [{"role": "user", "content": command_line_args.prompt}],
             add_generation_prompt=True,
             return_tensors="pt",
         )
@@ -174,7 +133,7 @@ def main() -> None:
             device
         )
     else:
-        input_ids = tok(args.prompt, return_tensors="pt")["input_ids"].to(device)
+        input_ids = tok(command_line_args.prompt, return_tensors="pt")["input_ids"].to(device)
     plen = int(input_ids.shape[1])
     eos = tok.eos_token_id
 
@@ -182,7 +141,7 @@ def main() -> None:
     with torch.inference_mode():
         cur = input_ids.clone()
         greedy_ids = []
-        for _ in range(args.max_new_tokens):
+        for _ in range(command_line_args.max_new_tokens):
             nt = int(target(cur, use_cache=False).logits[0, -1].argmax())
             greedy_ids.append(nt)
             cur = torch.cat([cur, torch.tensor([[nt]], device=device)], dim=1)
@@ -194,7 +153,7 @@ def main() -> None:
         torch.cuda.synchronize()
     t0 = time.time()
     out_ids = gen.generate(
-        input_ids, max_new_tokens=args.max_new_tokens, eos_token_id=eos
+        input_ids, max_new_tokens=command_line_args.max_new_tokens, eos_token_id=eos
     )
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -213,7 +172,7 @@ def main() -> None:
     with torch.inference_mode():
         bg = target.generate(
             input_ids,
-            max_new_tokens=args.max_new_tokens,
+            max_new_tokens=command_line_args.max_new_tokens,
             do_sample=False,
             num_beams=1,
             use_cache=True,
@@ -225,10 +184,10 @@ def main() -> None:
     base_new = int(bg.shape[1] - plen)
 
     rec = (
-        f"[eagle3_sgl] target={target_id} draft={args.eagle3_draft} "
-        f"verify={args.verify_mode}(backend={args.verify_attn_backend}) "
-        f"tree={args.tree_expand_mode} ar_draft={args.autoregressive_draft} inc_acts=True inc_draft_ext=True eagle_layers={eagle_layers} topk={args.topk} num_steps={args.num_steps} "
-        f"max_nodes={args.max_tree_nodes} dtype={args.dtype}\n"
+        f"[eagle3_sgl] target={target_id} draft={command_line_args.eagle3_draft} "
+        f"verify=full_model_tree(backend=auto) "
+        f"tree=cumulative ar_draft=True inc_acts=True inc_draft_ext=True eagle_layers={eagle_layers} topk=8 num_steps=8 "
+        f"max_nodes=64 dtype=float16\n"
         f"  new_tokens={n_new}  rounds={gen.n_rounds}  accept/round={accept_per_round:.2f}\n"
         f"  wall={dt:.2f}s  spec_tok/s={n_new / dt:.2f}  lossless={lossless}\n"
         f"  baseline(HF greedy) new_tokens={base_new}  wall={base_dt:.2f}s  "
@@ -245,11 +204,11 @@ def main() -> None:
     )
     print("====================================================")
 
-    with open(args.perf_log, "a") as f:
+    with open(perf_log_path, "a") as f:
         f.write(time.strftime("%Y-%m-%d %H:%M:%S\n"))
         f.write(rec)
         f.write("\n")
-    print(f"[eagle3-e2e] perf appended to {os.path.abspath(args.perf_log)}")
+    print(f"[eagle3-e2e] perf appended to {os.path.abspath(perf_log_path)}")
     assert lossless, "EAGLE3 output diverged from clean-greedy baseline"
     print("[eagle3-e2e] OK (lossless)")
 

@@ -14,7 +14,7 @@ draft_topk_fn:(多层 act [B, n*H], 父节点 token id) → topk ids + 分数。
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
 import torch
@@ -29,9 +29,6 @@ class TreeDraftResult:
 
     token_ids: List[int]
     parent: List[int]
-    node_depth: List[int]
-    cum_log_probs: List[float] = field(default_factory=list)
-    """* [继承自 EAGLE2] 每个节点的累计 log 概率(cumulative 模式用;static 模式留空)。"""
 
 
 DraftTopkFn = Callable[
@@ -175,7 +172,6 @@ def expand_draft_tree(
     return TreeDraftResult(
         token_ids=token_ids,  # bfs式地保存了树里所有token id
         parent=parent,  # bfs式地保存了树里所有token的parent id
-        node_depth=depth,
     )
 
 
@@ -220,14 +216,13 @@ def _topk_log_probs(
 def _compact_tree_by_score(
     token_ids: List[int],
     parent: List[int],
-    node_depth: List[int],
     cum_log_probs: List[float],
     max_nodes: int,
-) -> Tuple[List[int], List[int], List[int], List[float]]:
+) -> Tuple[List[int], List[int]]:
     """* [继承自 EAGLE2] 按累计分保留至多 max_nodes 个节点,并带上其祖先(保证 parent 链有效)."""
     n = len(token_ids)
     if n <= max_nodes:
-        return token_ids, parent, node_depth, cum_log_probs
+        return token_ids, parent
 
     # 先按 cum_log_prob 取 top max_nodes 个点,再把每个点的整条祖先链并入 keep
     ranked = sorted(range(n), key=lambda i: cum_log_probs[i], reverse=True)
@@ -244,8 +239,6 @@ def _compact_tree_by_score(
     return (
         [token_ids[i] for i in order],
         [old_to_new[parent[i]] if parent[i] >= 0 else -1 for i in order],
-        [node_depth[i] for i in order],
-        [cum_log_probs[i] for i in order],
     )
 
 
@@ -331,16 +324,11 @@ def expand_draft_tree_topk(
         frontier = candidates[:K]
 
     # 步数跑完后若节点超预算:按分数剪枝并保留祖先链
-    token_ids, parent, node_depth, cum_log_probs = _compact_tree_by_score(
-        token_ids, parent, node_depth, cum_log_probs, cfg.max_tree_nodes
+    token_ids, parent = _compact_tree_by_score(
+        token_ids, parent, cum_log_probs, cfg.max_tree_nodes
     )
 
-    return TreeDraftResult(
-        token_ids=token_ids,
-        parent=parent,
-        node_depth=node_depth,
-        cum_log_probs=cum_log_probs,
-    )
+    return TreeDraftResult(token_ids=token_ids, parent=parent)
 
 
 def expand_draft_tree_ar(
@@ -416,7 +404,7 @@ def expand_draft_tree_ar(
             depth.append(d + 1)
             q.append((cidx, d + 1, ct, h, kv))  # 子分支带走 step 后的 (cond, kv)
 
-    return TreeDraftResult(token_ids=token_ids, parent=parent, node_depth=depth)
+    return TreeDraftResult(token_ids=token_ids, parent=parent)
 
 
 def tree_draft_to_verify_layout(

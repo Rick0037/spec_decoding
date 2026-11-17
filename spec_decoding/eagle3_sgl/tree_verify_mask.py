@@ -72,26 +72,6 @@ def layout_tree_position_ids(
     return torch.tensor(depths, dtype=torch.long) + int(past_len)
 
 
-def build_tree_allow_mask_4d(
-    layout: TreeVerifyLayout,
-    *,
-    device: torch.device,
-    dtype: torch.dtype = torch.float32,
-) -> torch.Tensor:
-    """
-    EAGLE-style draft×draft block: [1, 1, L, L], 1.0 = allow, 0.0 = block.
-    """
-    n = len(layout)
-    if n == 0:
-        return torch.zeros(1, 1, 0, 0, device=device, dtype=dtype)
-    m = torch.zeros(1, 1, n, n, device=device, dtype=dtype)
-    for i in range(n):
-        for j in range(n):
-            if _on_tree_path(layout.parent, j, i):
-                m[0, 0, i, j] = 1.0
-    return m
-
-
 def _on_tree_path(parent: Sequence[int], anc: int, desc: int) -> bool:
     """若 anc 是 desc 的祖先或 anc==desc(沿 parent 指针向上走),返回 True."""
     k = desc

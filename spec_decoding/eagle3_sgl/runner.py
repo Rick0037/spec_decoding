@@ -23,7 +23,7 @@ verify_mode=reference_paths:逐叶干净前向,实现简单、便于对照。
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -275,7 +275,7 @@ class Eagle3SglGenerator:
         Returns
         -------
         TreeDraftResult
-            摊平后的 draft 树(token_ids / parent / node_depth 等)。
+            摊平后的 draft 树(token_ids / parent)。
         """
         # * [EAGLE3 新增 vs EAGLE1/2] AR 建树:draft 自回归(KV fork + feature 递归);
         # 非 AR 则像 eagle1/eagle2 那样每节点回调 draft_topk_fn。
@@ -403,35 +403,22 @@ class Eagle3SglGenerator:
                 leaves=leaves,
                 device=device,
             )
-            append = torch.tensor([append_list], device=device, dtype=torch.long)
-            return append
-
-        if self.cfg.verify_mode != "reference_paths":
-            raise ValueError(f"unhandled verify_mode={self.cfg.verify_mode!r}")
+            return torch.tensor([append_list], device=device, dtype=torch.long)
 
         # reference_paths:每条叶路径一次完整 causal forward(串行verify),选 match 最长的叶(慢,易对照)
         best_m = -1
-        best_li = 10**9
         best_next = 0
         best_leaf = 0
-        for li, leaf in enumerate(leaves):
+        for leaf in leaves:
             path = _path_tokens_to_leaf(draft_res.parent, draft_res.token_ids, leaf)
             mlen, nxt = _verify_path_clean(self.target_m, full_prefix_ids, path, device)
-            # 平局:leaf 下标更小者优先(与 extend verify 的 tie-break 一致)
-            if mlen > best_m or (mlen == best_m and li < best_li):
-                best_m, best_li, best_next, best_leaf = mlen, li, nxt, leaf
+            # 接受数相同时保留排在前面的路径(与 extend verify 一致)
+            if mlen > best_m:
+                best_m, best_next, best_leaf = mlen, nxt, leaf
 
-        path = _path_tokens_to_leaf(
-            draft_res.parent, draft_res.token_ids, int(best_leaf)
-        )
-        # 全中:采纳整条 path + bonus;否则采纳 path[:m] + target 纠正的下一 token
-        if best_m == len(path):
-            append_list = path + [best_next]
-        else:
-            append_list = path[:best_m] + [best_next]
-
-        append = torch.tensor([append_list], device=device, dtype=torch.long)
-        return append
+        path = _path_tokens_to_leaf(draft_res.parent, draft_res.token_ids, best_leaf)
+        append_list = path[:best_m] + [best_next]
+        return torch.tensor([append_list], device=device, dtype=torch.long)
 
     # ------------------------------------------------------------------
     # 多轮自回归:每轮 = generate_step_payload + 用 target 重放 append 以对齐 KV.
@@ -460,14 +447,6 @@ class Eagle3SglGenerator:
         out_ids
             prompt + 全部已采纳 token [1, P0 + total_new]。
         """
-        if self.cfg.verify_mode not in (
-            "full_model_tree",
-            "reference_paths",
-        ):
-            raise ValueError(
-                "generate() requires verify_mode in full_model_tree, reference_paths"
-            )
-
         device = input_ids.device
         out_ids = input_ids.clone()
         new_tok = 0
@@ -552,43 +531,3 @@ class Eagle3SglGenerator:
             if eos_token_id is not None and (append == eos_token_id).any():
                 break
         return out_ids
-
-
-# -----------------------------------------------------------------------------
-# 注意:以下目前暂时不使用!!另一种常见的 draft 输入构造:token 的 embedding 与 target hidden 作为输入经过linear,
-# 其输出作为该步 draft Transformer 的 inputs_embeds,再取末位置logits 做 top-k.
-# draft_topk_fn:get_input_embeddings(token) + proj(hidden) → draft_model(inputs_embeds=...) → topk
-# -----------------------------------------------------------------------------
-def make_hidden_residual_draft_topk_fn(
-    draft_model: Union[PreTrainedModel, nn.Module],
-    proj: torch.nn.Linear,
-    topk: int,
-) -> DraftTopkFn:
-    """
-    工厂:token_emb + proj(target_hidden) 作为 draft 的输入嵌入,再经整模前向
-    得到 logits 的 top-k(体现在 target hidden 上建 draft)。
-
-    proj:in_features = target_hidden_dim,out_features = embedding_dim。
-    """
-
-    dm = _unwrap(draft_model)
-
-    def fn(
-        hidden: torch.Tensor, parent_token_id: torch.LongTensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        emb = dm.get_input_embeddings()(parent_token_id)
-        if emb.shape[-1] != proj.out_features:
-            raise ValueError(
-                f"proj.out_features={proj.out_features} must match embedding dim={emb.shape[-1]}"
-            )
-        x = emb + proj(hidden).unsqueeze(1)
-        b, s, _ = x.shape
-        att = torch.ones(b, s, device=x.device, dtype=torch.long)
-        out = dm(inputs_embeds=x, attention_mask=att, use_cache=False)
-        logits = out.logits[:, -1, :]
-        k = min(topk, logits.shape[-1])
-        log_probs = torch.log_softmax(logits, dim=-1)
-        lp, idx = torch.topk(log_probs, k=k, dim=-1)
-        return idx, lp
-
-    return fn
