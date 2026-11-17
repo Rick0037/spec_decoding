@@ -156,16 +156,16 @@ def _verify_path_clean(
 
 @dataclass
 class _DraftKvState:
-    """* [EAGLE3 新增 vs EAGLE1/2] AR draft 增量状态;generate() 每轮 extend 后更新,供 expand_draft_tree_ar 复用."""
+    """保存 draft 的增量状态，供下一轮建树复用。"""
 
     kv: Any
-    """draft midlayer 的 (k, v);序列长度 = prefix_len - 1(EAGLE shift)。"""
+    """draft 注意力层的 (key, value) 缓存；序列长度为 prefix_len - 1。"""
     prefix_len: int
-    """当前 target 已接受前缀长度 P;与 out_ids.shape[1] 对齐。"""
+    """当前已接受序列长度，与 out_ids.shape[1] 一致。"""
     root_logits: torch.Tensor
-    """prefill/extend 末步 draft logits [1, V];根层 topk 来源。"""
+    """末位置的 draft logits [1, draft_vocab_size]，用于选择根层候选。"""
     root_hidden: torch.Tensor
-    """prefill/extend 末步 draft hidden [1, H];各 BFS 分支初始 cond(feature 递归起点)。"""
+    """末位置的 draft hidden [1, hidden_size]，作为各分支递归展开的初始条件。"""
 
 
 # -----------------------------------------------------------------------------
@@ -175,7 +175,7 @@ class Eagle3SglGenerator:
     """
     EAGLE3 多层 act 条件 AR draft + top-k 树 + 树掩码 verify。
 
-    draft 使用自己的 KV cache，并沿树路径递归更新 hidden。
+    draft 使用自己的 KV cache, 并沿树路径递归更新 hidden。
     """
 
     def __init__(
@@ -333,12 +333,21 @@ class Eagle3SglGenerator:
             out_ids, attention_mask=att, use_cache=True, output_hidden_states=True
         )
         past = out0.past_key_values
+        # * recovery_logits.shape -> [vob_size]
         recovery_logits = out0.logits[0, -1]
+        #! 为什么 last_token_only = false 是因为实际上需要全部的feature 需要进去算kv cache
         acts_all = select_eagle_acts_from_hidden_states(
             out0.hidden_states, self.eagle_layers, last_token_only=False
         )
+        # *------first init------
+        # * acts_all `[B, S, n_acts*H]`，本脚本是 `[1, prompt_len, 3*4096]`
+        # （Llama-3.1-8B，`eagle_layers=[2, 16, 29]`）。
         # ③ AR draft prefill,建立首轮使用的 KV 和递归 hidden
+        # * d_logits  跟target 一样得token
+        # * d_hidden 上面这个token得hidden size
+        # * d_kv 仅仅有 prompt
         d_logits, d_hidden, d_kv = self.draft_model.prefill(out_ids, acts_all)
+        # * prefill得初始状态
         draft_state = _DraftKvState(
             kv=d_kv,
             prefix_len=int(out_ids.shape[1]),
@@ -350,6 +359,15 @@ class Eagle3SglGenerator:
             if eos_token_id is not None and out_ids[0, -1].item() == eos_token_id:
                 break  # 已到 EOS,停止
             # ④ 单轮:AR 建树 → verify → append
+            """
+                [in]
+                out_ids 首字输入
+                past 历史kv cache
+                recovery_logits target吐出来得首字
+                draft_state draftm model 的首字结论
+                [out]
+                append 实际接受的字段
+            """
             append = self.generate_step_payload(
                 out_ids, past, recovery_logits, draft_state
             )
@@ -361,6 +379,8 @@ class Eagle3SglGenerator:
                 device=device,
                 dtype=torch.long,
             )
+            # * 实际上这里的 out_sync 的hidden state 就仅仅又三个接收的token的hidden state了
+            #! 如果这里是全部接收的情况下, 最后一个bonus token 必须补算的, 如果是中间接收的话, 这部分有冗余的
             out_sync = self.target_m(
                 append,
                 past_key_values=past,
@@ -370,18 +390,30 @@ class Eagle3SglGenerator:
             )
             past = out_sync.past_key_values
             recovery_logits = out_sync.logits[0, -1]
-            # 只把本轮新接受位置的 target act cat 进 acts_all(避免每轮整段重算 hidden)
+            # * 只计算本轮新增加的 hidden states
             append_acts = select_eagle_acts_from_hidden_states(
                 out_sync.hidden_states, self.eagle_layers, last_token_only=False
             )
+            # * 把本轮接受位置的特征拼到完整特征序列末尾
+            # import pdb
+
+            # pdb.set_trace()
             acts_all = torch.cat([acts_all, append_acts], dim=1)
-            # AR draft 增量写入本轮接受的 token,供下一轮建树复用
+            # token t 使用 t-1 位置的特征，所以切片两端都减 1
             p_old = draft_state.prefix_len
-            p_new = int(out_ids.shape[1]) + int(append.shape[1])
-            ext_acts = acts_all[:, p_old - 1 : p_new - 1, :]
+            p_new = p_old + int(append.shape[1])
+            #! p_new - 1 的切片不包括 p_new - 1, 直到 p_new - 2 就停止了, 这里搞了一波错位
+            #! append token 下标：21、22、23
+            #! 对应 feature 下标:20、21、22
+            next_time_send_features = acts_all[:, p_old - 1 : p_new - 1, :]
+            """
+            接受路径的临时 KV 理论上可以复用, 
+            但里面使用的是未被 target 校正的预测 hidden, 直接提交可能累积误差.
+            所以这里选择对接受 token 重新计算.
+            """
             d_logits, d_hidden, d_kv = self.draft_model.extend_tokens(
                 append,
-                ext_acts,
+                next_time_send_features,
                 draft_state.kv,
                 p_old - 1,
             )
@@ -391,6 +423,7 @@ class Eagle3SglGenerator:
                 root_logits=d_logits,
                 root_hidden=d_hidden,
             )
+            # *--- 这里才最终接收
             out_ids = torch.cat([out_ids, append], dim=1)
             new_tok += int(append.numel())
             self.n_rounds += 1

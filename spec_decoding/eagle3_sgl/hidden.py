@@ -32,43 +32,27 @@ def select_eagle_acts_from_hidden_states(
     last_token_only: bool = True,
 ) -> torch.Tensor:
     """
-    * [EAGLE3 新增 vs EAGLE1/2] 从 HF output_hidden_states 元组里取多层激活并拼接,
-    供 EAGLE3 draft 吸收作为输入(EAGLE1/2 只取单层末 hidden)。
+    * [EAGLE3 新增 vs EAGLE1/2] 从 HF output_hidden_states 取多层激活拼接,
+    供 EAGLE3 draft 作为输入(EAGLE1/2 只取单层末 hidden)。
 
-    Parameters
-    ----------
-    hidden_states
-        HF forward 返回的 hidden_states 元组。hidden_states[0] 为 embedding 输出;
-        hidden_states[i](i>=1)为第 i-1 层 decoder 输出 = 第 i 层输入残差流。
-    eagle_layers
-        要采集的层下标列表(如 [2, L//2, L-3])。取 hidden_states[layer_idx],
-        即进入该层之前的残差流(对齐官方 EAGLE3 训练时的 fc 输入)。
-    last_token_only
-        True:每层只取末 token [:, -1, :],输出 [B, n*H](建树根条件 / recovery)。
-        False:保留全序列 [B, S, H] 逐层 cat 成 [B, S, n*H](draft prefill / acts_all)。
-
-    Returns
-    -------
-    Tensor
-        last_token_only=True → [B, len(eagle_layers) * hidden_dim];
-        False → [B, S, len(eagle_layers) * hidden_dim]。
+    hidden_states[0] 是 embedding,hidden_states[i] 是第 i-1 层输出;
+    取 hidden_states[layer_idx](进入该层前的残差流)。
+    last_token_only=True 时每层只留末 token → [B, n*H],否则 → [B, S, n*H]。
     """
     if not hidden_states:
         raise ValueError("hidden_states must be non-empty")
     # hidden_states[i] = 进入第 i 层 transformer 前的残差流
-    n_layers = len(hidden_states) - 1
     chunks: List[torch.Tensor] = []
     for layer_idx in eagle_layers:
-        if layer_idx < 0 or layer_idx >= len(hidden_states):
-            raise ValueError(
-                f"eagle layer index {layer_idx} out of range for "
-                f"{n_layers} transformer layers"
-            )
         h = hidden_states[layer_idx]  # 第 layer_idx 层的输入残差流
         if last_token_only:
             h = h[:, -1, :]  # 只关心前缀最后一个位置的多层特征
         chunks.append(h.contiguous())
     # 输出 [B, n*H] 或 [B, S, n*H]:draft 的 fc 入口维 = len(eagle_layers) * H
+    # (Pdb) len(chunks)
+    # 3
+    # (Pdb) chunks[0].shape
+    # torch.Size([1, 21, 4096]) -> torch.Size([1, 21, 4096 * 3])
     return torch.cat(chunks, dim=-1)
 
 

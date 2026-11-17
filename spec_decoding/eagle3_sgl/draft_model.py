@@ -101,6 +101,7 @@ class _Eagle3MidLayer(nn.Module):
         self.hidden_norm = _RMSNorm(hidden, eps=eps, **fk)
         self.post_attention_layernorm = _RMSNorm(hidden, eps=eps, **fk)
         # qkv 输入维度 = 2H(embed 与 hidden 拼接);q/o 输出 H,k/v 输出 kv_dim(GQA)
+        # * 偷偷降维度了
         self.q_proj = nn.Linear(2 * hidden, hidden, bias=False, **fk)
         self.k_proj = nn.Linear(2 * hidden, kv_dim, bias=False, **fk)
         self.v_proj = nn.Linear(2 * hidden, kv_dim, bias=False, **fk)
@@ -123,6 +124,7 @@ class _Eagle3MidLayer(nn.Module):
         hidden: torch.Tensor,
         positions: torch.Tensor,
     ):
+        # * 只返回了提示词得kv, 没有返回new token
         b, S, _ = embeds.shape
         residual = hidden
         e = self.input_layernorm(embeds)
@@ -135,6 +137,9 @@ class _Eagle3MidLayer(nn.Module):
         q = _apply_rope(q, cos, sin)
         k = _apply_rope(k, cos, sin)
         new_kv = (k, v)
+        # import pdb
+
+        # pdb.set_trace()
         # GQA:把 kv repeat 到 q head 维再做SDPA
         rep = self.n_heads // self.n_kv_heads
         kk = k.repeat_interleave(rep, dim=1) if rep > 1 else k
@@ -180,6 +185,8 @@ class _Eagle3MidLayer(nn.Module):
         vv = v.repeat_interleave(rep, dim=1) if rep > 1 else v
         past_len = int(kk.shape[2]) - A
         # 显式 mask:第 i 个新 token 的 Q 只能 attend 前 past_len+i+1 个 K
+        # * 这里是并行的进行kv 的更新, 但是实际上, draft的时候是串行生成的, 需要加mask 和串行生成一样才行
+        # * 核心原因是: 虽然一次并行处理 A 个接受的 token, 但结果必须和一个个串行输入完全一样 .
         idx_q = torch.arange(A, device=x.device).view(A, 1)
         idx_k = torch.arange(kk.shape[2], device=x.device).view(1, -1)
         allowed = idx_k <= (past_len + idx_q)
@@ -380,6 +387,7 @@ class Eagle3SglDraftModel(nn.Module):
         prefix_ids: torch.LongTensor,
         target_acts_all: torch.Tensor,
     ):
+        #! draft model 也需要自己得kv cache
         """对 prompt做 draft prefill。
 
         Parameters
@@ -397,19 +405,29 @@ class Eagle3SglDraftModel(nn.Module):
         EAGLE shift:draft 消费 prefix_ids[:,1:] 与 acts_all[:,:-1],
         即位置 t 的 draft 输入 act 来自 target 在 t-1 处的多层特征。
         """
-        ids = prefix_ids[:, 1:]  # EAGLE shift:draft 不消费 prompt 首 token
+        # EAGLE shift:draft 不消费 prompt 首 token
+        # import pdb
+
+        # pdb.set_trace()
+        ids = prefix_ids[:, 1:]  # * 丢掉第一个token
         # 位置 t 的 draft 条件 = target 在 t-1 的多层 act
-        acts = target_acts_all[:, :-1, :]
+        # * (Pdb) target_acts_all.shape
+        # *  torch.Size([1, 21, 12288])
+        acts = target_acts_all[:, :-1, :]  # * 去掉最后一个
         embeds = self.embed(ids)
         S = embeds.shape[1]
         if S == 0:
             raise ValueError(
                 "prefix too short for EAGLE3 draft prefill (need len >= 2)"
             )
+        # * torch.Size([1, 21, 12288])-> torch.Size([1, 21, 4096])
         reduced = self.fc(acts.to(embeds.dtype))
         positions = torch.arange(S, device=embeds.device)  # RoPE 0..S-1
-        # 整段因果 self-attn,输出末 hidden + 长度为prefill tokens的 KV(供后续 extend;KV 条数 = prefill token 数)
+        # 整段因果 self-attn,
+        # 输出末 hidden + 长度为prefill tokens的 KV(供后续 extend;KV 条数 = prefill token 数)
         h, kv = self.midlayer.prefill(embeds, reduced, positions)
+        # (Pdb) kv[0].shape
+        # torch.Size([1, 8, 20, 128])
         last = self.norm(h)[:, -1, :]
         return self._lm_logits(last), h[:, -1, :], kv
 
@@ -421,31 +439,23 @@ class Eagle3SglDraftModel(nn.Module):
         past_kv,
         start_position: int,
     ):
-        """每轮 verify 后,在已有 draft KV 上增量 extend 本轮接受的 append token。
+        """把本轮接受的 token 写入 draft, 并更新 KV 缓存.
 
-        Parameters
-        ----------
-        token_ids
-            本轮 append [1, A](target id)。
-        target_acts
-            与 append 对齐的 act 段 [1, A, n*H]。
-        past_kv
-            上一轮 draft KV。
-        start_position
-            append 首 token 的 RoPE 起始位置(= 旧 prefix_len - 1)。
+        token_ids: 本轮接受的 token [batch_size, accept_len].
+        target_acts: 对应的 target 特征 [batch_size, accept_len, n*H];
+        TODO: 注意现在实际错位使用的token使用前一位置feature.
+        past_kv: 之前保存的 draft KV.
+        start_position: 首个 token 的 RoPE 位置, 等于 p_old - 1,
 
-        Returns
-        -------
-        root_logits, root_hidden, kv
-            extend 末步 logits/hidden 与更新后的 KV(供下一轮 expand_draft_tree_ar)。
+        返回下一个 token 的 logits, 末位置 hidden 和更新后的 KV.
         """
-        A = int(token_ids.shape[1])
-        if A == 0:
-            raise ValueError("extend_tokens requires at least one token")
-        if target_acts.shape[1] != A:
-            raise ValueError(
-                f"target_acts seq {target_acts.shape[1]} != token_ids seq {A}"
-            )
+        # A = int(token_ids.shape[1])
+        # if A == 0:
+        #     raise ValueError("extend_tokens requires at least one token")
+        # if target_acts.shape[1] != A:
+        #     raise ValueError(
+        #         f"target_acts seq {target_acts.shape[1]} != token_ids seq {A}"
+        #     )
         embeds = self.embed(token_ids)
         reduced = self.fc(target_acts.to(embeds.dtype))
         # 批量更新 KV等draft state
@@ -596,6 +606,3 @@ def load_eagle3_draft_weights(
         "missing": list(res.missing_keys),
         "unexpected": list(res.unexpected_keys),
     }
-
-
-
