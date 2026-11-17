@@ -68,21 +68,6 @@ def _apply_rope(t: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.
     return out.to(t.dtype)
 
 
-def _sdpa_gqa(
-    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, n_heads: int, n_kv_heads: int
-) -> torch.Tensor:
-    """因果 SDPA,支持 GQA(k/v 头数 < q 头数时把 kv 头按组重复)。
-
-    真实 EAGLE3 draft(如 LLaMA3.1-8B)是 GQA(如 32 q / 8 kv heads),不支持会导致权重 shape 不匹配。
-    """
-    if n_kv_heads != n_heads:
-        # SDPA 要求 q/k/v head 数一致:把每组 kv 复制到对应多个 q head
-        rep = n_heads // n_kv_heads
-        k = k.repeat_interleave(rep, dim=1)
-        v = v.repeat_interleave(rep, dim=1)
-    return F.scaled_dot_product_attention(q, k, v, is_causal=True)
-
-
 class _Eagle3MidLayer(nn.Module):
     """EAGLE3 首层(midlayer):
 
@@ -123,30 +108,6 @@ class _Eagle3MidLayer(nn.Module):
         self.gate_proj = nn.Linear(hidden, intermediate, bias=False, **fk)
         self.up_proj = nn.Linear(hidden, intermediate, bias=False, **fk)
         self.down_proj = nn.Linear(intermediate, hidden, bias=False, **fk)
-
-    def _attn(self, x2h: torch.Tensor) -> torch.Tensor:
-        """对 [B,S,2H] 输入做(GQA)多头因果自注意力,输出 [B,S,H]."""
-        b, s, _ = x2h.shape
-        q = self.q_proj(x2h).view(b, s, self.n_heads, self.head_dim).transpose(1, 2)
-        k = self.k_proj(x2h).view(b, s, self.n_kv_heads, self.head_dim).transpose(1, 2)
-        v = self.v_proj(x2h).view(b, s, self.n_kv_heads, self.head_dim).transpose(1, 2)
-        o = _sdpa_gqa(q, k, v, self.n_heads, self.n_kv_heads)
-        return self.o_proj(
-            o.transpose(1, 2).contiguous().view(b, s, self.n_heads * self.head_dim)
-        )
-
-    def forward(self, embeds: torch.Tensor, hidden: torch.Tensor) -> torch.Tensor:
-        # EAGLE3:两条输入流(token embed vs target 多层 act 经 fc变换的 H),拼成 2H 再进注意力
-        residual = hidden  # 残差流 = 降维后的多层 act
-        e = self.input_layernorm(embeds)  # 归一化 embed
-        # 归一化 高中低hidden(EAGLE3论文idea,已经经过了fc)
-        hn = self.hidden_norm(hidden)
-        x = torch.cat([e, hn], dim=-1)  # [B,S,2H]
-        hidden = residual + self._attn(x)  # attn 输出 H + 残差
-        residual = hidden
-        h = self.post_attention_layernorm(hidden)
-        mlp = self.down_proj(F.silu(self.gate_proj(h)) * self.up_proj(h))
-        return residual + mlp  # [B,S,H]
 
     def _rope_cos_sin(self, positions: torch.Tensor, device, dtype) -> tuple:
         pos = positions.to(device=device, dtype=torch.float32).view(-1)
@@ -352,6 +313,8 @@ class Eagle3SglDraftModel(nn.Module):
                 d2t = torch.zeros(draft_vocab_size, dtype=torch.long)
             # hot_token_id[draft_id] = 该 draft id 对应的 target vocab id
             hot = d2t.to(torch.long) + torch.arange(draft_vocab_size, dtype=torch.long)
+            # * hot.shape -> [32000], hot_token_id.shape[32000]
+            # * 加载权重之后 通过index 取 实际在target词表中得token ids
             self.register_buffer("hot_token_id", hot.to(device=device))
             self._shared_lmhead = None
         else:
@@ -371,38 +334,6 @@ class Eagle3SglDraftModel(nn.Module):
         if lmh is not None:
             return lmh(x)
         return F.linear(x, self.embed.weight)  # tied embedding
-
-    def forward(
-        self,
-        token_ids: torch.LongTensor,
-        target_acts: torch.Tensor,
-    ) -> torch.Tensor:
-        """同step的核心区别主要是无状态无 KV extend update
-        供非 autoregression模式下调用make_eagle3_sgl_draft_topk_fn建树)。
-
-        Parameters
-        ----------
-        token_ids
-            [B, S] draft token 序列(通常 S=1)。
-        target_acts
-            [B, n*H] 或 [B, S, n*H] target 多层 act;经 fc 降维后与 embed 进 midlayer。
-
-        Returns
-        -------
-        logits
-            [B, V] 末位置 logits(V = draft_vocab 或 target vocab)。
-        """
-        embeds = self.embed(token_ids)  # [B, S, H]
-        if target_acts.dim() == 2:
-            target_acts = target_acts.unsqueeze(1)  # [B, 1, n*H] 广播到 S
-        if target_acts.shape[1] != embeds.shape[1]:
-            target_acts = target_acts.expand(-1, embeds.shape[1], -1)
-        # 主干:低中高3层 target act → fc → H,与 token embed 一起进 EAGLE3 midlayer
-        reduced = self.fc(target_acts.to(embeds.dtype))  # n*H → H
-        # embed/hidden 分别 norm 后拼 2H
-        h = self.midlayer(embeds, reduced)
-        h = self.norm(h)
-        return self._lm_logits(h[:, -1, :])
 
     @torch.inference_mode()
     def step(
@@ -523,7 +454,7 @@ class Eagle3SglDraftModel(nn.Module):
         return self._lm_logits(last), h[:, -1, :], kv
 
     @torch.inference_mode()
-    def topk_target_ids(self, logits: torch.Tensor, k: int):
+    def convert_to_target_topk_token_ids(self, logits: torch.Tensor, k: int):
         """logits top-k;独立词表时经 hot_token_id 映射回 target id。
 
         Parameters
@@ -667,36 +598,4 @@ def load_eagle3_draft_weights(
     }
 
 
-def make_eagle3_sgl_draft_topk_fn(draft_model: Eagle3SglDraftModel, topk: int):
-    """工厂:把 Eagle3SglDraftModel 包成 tree_draft.DraftTopkFn。
 
-        * [与 EAGLE2 的差异] 分数是原始 logits 的 top-k 值(未 log_softmax;eagle2 的
-        make_eagle2_draft_topk_fn 返回 log 概率)。cumulative 建树时由 _topk_log_probs
-        在 top-k 子集上规范化。d2t 映射(draft id → target id)是 EAGLE3 独立 draft 词表特有。
-
-        若 draft 用独立词表(hot_token_id 非空),topk 得到的是 draft id,会经 d2t 映射成
-        target vocab id 再返回(树与 verify 始终在 target 词表空间)。
-
-        问题: 有了独立词表后,topk fn输出的draft topk ids为什么要映射回target id?
-        答: 要统一draft 词表的 id 和 target 词表的 id 不是一回事。draft lm_head 输出的是
-    draft 词表空间里的下标(0..V_draft-1),它和 target 真实 token id 没有直接对应
-        关系——d2t(draft-to-target)就是这个对应关系:target_id = hot_token_id[draft_id]
-        (代码里 hot_token_id = d2t + arange)。
-
-        回忆eagle1和eagle2,两步都在 target 词表空间工作:
-
-        1.建 draft 树:树节点要存真实 token,下一步还要用它去 embed、拼前缀;
-        2.target verify:target 用自己的完整词表逐位 argmax 比对,比较对象必须是 target id
-        否则树里存的就是错的 id,verify 也无法对齐
-
-    """
-
-    @torch.inference_mode()
-    def fn(
-        acts: torch.Tensor, parent_token_id: torch.LongTensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # 与 expand_draft_tree 约定一致:parent_token 通常shape是 [B=batchsize,1],acts 是根条件即低中高特征 [B,n*H]
-        logits = draft_model(parent_token_id, acts)  # [B, V_draft 或 V_target]
-        return draft_model.topk_target_ids(logits, topk)
-
-    return fn

@@ -52,10 +52,7 @@ class TestEagle3Sgl(unittest.TestCase):
         cls.eagle_layers = [0, 1] if cls.n_layers <= 2 else None
 
     def test_draft_structure_aligned_with_sglang(self) -> None:
-        from spec_decoding.eagle3_sgl import (
-            build_eagle3_sgl_draft,
-            make_eagle3_sgl_draft_topk_fn,
-        )
+        from spec_decoding.eagle3_sgl import build_eagle3_sgl_draft
 
         layers = [0, 1] if self.n_layers <= 2 else list(range(min(3, self.n_layers)))
         draft = build_eagle3_sgl_draft(self.target, layers)
@@ -66,20 +63,15 @@ class TestEagle3Sgl(unittest.TestCase):
         # (3) midlayer:qkv 输入 = 2H,且有独立的 hidden_norm
         self.assertEqual(draft.midlayer.q_proj.in_features, 2 * H)
         self.assertTrue(hasattr(draft.midlayer, "hidden_norm"))
-        fn = make_eagle3_sgl_draft_topk_fn(draft, topk=3)
-        acts = torch.zeros(1, len(layers) * H)
-        idx, sc = fn(acts, torch.tensor([[5]], dtype=torch.long))
+        logits = torch.zeros(1, int(self.target.config.vocab_size))
+        idx, sc = draft.convert_to_target_topk_token_ids(logits, 3)
         self.assertEqual(idx.shape, (1, 3))
 
     def test_independent_draft_vocab_and_d2t(self) -> None:
         # (2) 独立 draft 词表 + d2t 映射 + 不共享 lm_head
-        from spec_decoding.eagle3_sgl import (
-            build_eagle3_sgl_draft,
-            make_eagle3_sgl_draft_topk_fn,
-        )
+        from spec_decoding.eagle3_sgl import build_eagle3_sgl_draft
 
         layers = [0, 1] if self.n_layers <= 2 else list(range(min(3, self.n_layers)))
-        H = int(self.target.config.hidden_size)
         dv = 16
         # d2t 全 0 -> hot_token_id = arange(dv),draft id 即落在 target [0,dv) 上
         draft = build_eagle3_sgl_draft(
@@ -93,10 +85,7 @@ class TestEagle3Sgl(unittest.TestCase):
         self.assertNotEqual(
             dv, int(self.target.config.vocab_size)
         )  # 不等于 target 词表
-        fn = make_eagle3_sgl_draft_topk_fn(draft, topk=3)
-        idx, sc = fn(
-            torch.zeros(1, len(layers) * H), torch.tensor([[5]], dtype=torch.long)
-        )
+        idx, sc = draft.convert_to_target_topk_token_ids(torch.zeros(1, dv), 3)
         self.assertEqual(idx.shape, (1, 3))
         self.assertTrue(int(idx.max()) < dv)  # 经 d2t 映射后落在 target 词表前 dv 个 id
 
@@ -108,7 +97,6 @@ class TestEagle3Sgl(unittest.TestCase):
         from spec_decoding.eagle3_sgl import (
             build_eagle3_sgl_draft,
             load_eagle3_draft_weights,
-            make_eagle3_sgl_draft_topk_fn,
         )
 
         layers = [0, 1] if self.n_layers <= 2 else list(range(min(3, self.n_layers)))
@@ -129,26 +117,26 @@ class TestEagle3Sgl(unittest.TestCase):
         # 加载后两者输出应一致
         acts = torch.randn(1, len(layers) * H)
         parent = torch.tensor([[7]], dtype=torch.long)
+
+        def run(draft):
+            return draft.step(parent, acts, None, 0)[0]
+
         with torch.inference_mode():
-            self.assertTrue(
-                torch.allclose(src(parent, acts), dst(parent, acts), atol=1e-5)
-            )
+            src_logits = run(src)
+            self.assertTrue(torch.allclose(src_logits, run(dst), atol=1e-5))
 
         # 也验证"build 时直接传 draft_weights_path"这条路
         dst2 = build_eagle3_sgl_draft(
             self.target, layers, draft_vocab_size=dv, d2t=d2t, draft_weights_path=path
         )
         with torch.inference_mode():
-            self.assertTrue(
-                torch.allclose(src(parent, acts), dst2(parent, acts), atol=1e-5)
-            )
+            self.assertTrue(torch.allclose(src_logits, run(dst2), atol=1e-5))
 
     def test_lossless_vs_greedy(self) -> None:
         from spec_decoding.eagle3_sgl import (
             Eagle3SglConfig,
             Eagle3SglGenerator,
             build_eagle3_sgl_draft,
-            make_eagle3_sgl_draft_topk_fn,
         )
 
         input_ids = torch.tensor([[1, 2, 3]], dtype=torch.long)
@@ -173,13 +161,7 @@ class TestEagle3Sgl(unittest.TestCase):
         )
         layers = cfg.resolve_eagle_layers(self.n_layers)
         draft = build_eagle3_sgl_draft(self.target, layers)
-        gen = Eagle3SglGenerator(
-            self.target,
-            cfg,
-            make_eagle3_sgl_draft_topk_fn(draft, topk=2),
-            draft_model=draft,
-            autoregressive_draft=True,
-        )
+        gen = Eagle3SglGenerator(self.target, cfg, draft)
         out = gen.generate(input_ids, max_new_tokens=max_new)
         spec_cont = out[0, input_ids.shape[1] :]
 

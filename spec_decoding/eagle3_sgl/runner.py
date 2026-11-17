@@ -9,10 +9,10 @@ EAGLE3 外层调度:target 多层 act 条件 draft + 树 + verify → 多步生�
       ├─ draft_model.prefill() → draft_state(AR 路径)
       └─ loop:
            generate_step_payload()
-             ├─ _build_tree() → expand_draft_tree_ar / expand_draft_tree(_topk)
+             ├─ _build_tree() → expand_draft_tree_ar
              └─ verify:
                   full_tree_verify_extend|triton  (verify_mode=full_model_tree)
-                  或 _verify_path_clean × 叶子数   (verify_mode=reference_paths)
+                  或 _verify_path_clean * 叶子数   (verify_mode=reference_paths)
            target replay append → 更新 past / recovery_logits / acts_all
            draft_model.extend_tokens() → 更新 draft_state(AR 路径)
 
@@ -30,13 +30,10 @@ import torch.nn as nn
 from transformers import PreTrainedModel
 
 from .config import Eagle3SglConfig
-from .hidden import forward_target_eagle_acts, select_eagle_acts_from_hidden_states
+from .hidden import select_eagle_acts_from_hidden_states
 from .tree_draft import (
-    DraftTopkFn,
     TreeDraftResult,
-    expand_draft_tree,
     expand_draft_tree_ar,
-    expand_draft_tree_topk,
     tree_draft_to_verify_layout,
 )
 from .tree_verify_attn import triton_extend_available
@@ -176,42 +173,22 @@ class _DraftKvState:
 # -----------------------------------------------------------------------------
 class Eagle3SglGenerator:
     """
-    EAGLE3 多层 act 条件 draft(经 draft_topk_fn)+ 静态 topk 树 + 树掩码 verify。
+    EAGLE3 多层 act 条件 AR draft + top-k 树 + 树掩码 verify。
 
-    draft 的条件特征是 target 的多层 hidden 拼接(eagle_layers),
-    由 hidden.forward_target_eagle_acts 取出;
-
-    draft_topk_fn 可由 draft_model.make_eagle3_sgl_draft_topk_fn(轻量 EAGLE3 draft)
+    draft 使用自己的 KV cache，并沿树路径递归更新 hidden。
     """
 
     def __init__(
         self,
         target: Union[PreTrainedModel, nn.Module],
         cfg: Eagle3SglConfig,
-        draft_topk_fn: Optional[DraftTopkFn] = None,
-        *,
-        draft_model=None,
-        autoregressive_draft: bool = True,
-        refresh_target_each_node: bool = True,
+        draft_model,
     ) -> None:
-        """保存配置、draft 回调,并解析多层特征下标 eagle_layers。
-
-        autoregressive_draft=True(默认):draft hidden feature 递归(接受率更高);
-
-        autoregressive_draft=False:用 draft_topk_fn 单 token 建树;refresh_target_each_node
-        控制是否逐节点刷新 target act。
-        """
+        """保存 target、AR draft 和多层特征配置。"""
         self.target = target
         self.target_m = _unwrap(target)
         self.cfg = cfg
-        self.draft_topk_fn = draft_topk_fn
         self.draft_model = draft_model
-        self.autoregressive_draft = autoregressive_draft
-        self.refresh_target_each_node = refresh_target_each_node
-        if autoregressive_draft and draft_model is None:
-            raise ValueError("autoregressive_draft=True requires draft_model=...")
-        if not autoregressive_draft and draft_topk_fn is None:
-            raise ValueError("autoregressive_draft=False requires draft_topk_fn")
         # EAGLE3 多层特征下标(draft 条件来自这些层的末 token hidden 拼接)
         self.eagle_layers: List[int] = cfg.resolve_eagle_layers(
             _num_hidden_layers(target)
@@ -220,114 +197,25 @@ class Eagle3SglGenerator:
         self.n_rounds = 0
         self.n_accepted_tokens = 0
 
-    def _refresh_hidden(self, prefix_ids: torch.LongTensor) -> torch.Tensor:
-        """非 AR 建树的根条件:前缀末 token 的多层 act [1, n*H]。
-
-        Parameters
-        ----------
-        prefix_ids
-            当前已接受前缀 [1, P]。
-
-        用 use_cache=False 干净前向,不污染 generate() 维护的 target past。
-        """
-        acts, _, _ = forward_target_eagle_acts(
-            self.target,
-            prefix_ids,
-            self.eagle_layers,
-            use_cache=False,
-        )
-        return acts
-
-    def _refresh_all(self, prefix_ids: torch.LongTensor) -> torch.Tensor:
-        """各 token 位置的 target 多层 act [1, P, n*H],供eagle3 draft prefill"""
-        acts, _, _ = forward_target_eagle_acts(
-            self.target,
-            prefix_ids,
-            self.eagle_layers,
-            use_cache=False,
-            last_token_only=False,
-        )
-        return acts
-
     def _build_tree(
         self,
         prefix_ids: torch.LongTensor,
-        last_token_id: torch.LongTensor,
-        root_acts: Optional[torch.Tensor] = None,
-        acts_all: Optional[torch.Tensor] = None,
-        draft_state: Optional[_DraftKvState] = None,
+        draft_state: _DraftKvState,
     ) -> TreeDraftResult:
-        """根据 autoregressive_draft 选择 AR 建树(eagle3)或 draft_topk_fn(eagle1/eagle2) 建树。
-
-        Parameters
-        ----------
-        prefix_ids
-            当前已接受前缀 [1, P]。
-        last_token_id
-            前缀末 token [1, 1];非 AR 路径作为 draft_topk_fn 根层父 token。
-        root_acts
-            末 token 多层 act [1, n*H];非 AR 建树根条件(透传可省 target 重算)。
-        acts_all
-            全前缀各位置 act [1, P, n*H];AR 路径无 draft_state 时 prefill fallback。
-        draft_state
-            增量 draft KV + 末步输出;AR decode 阶段复用,避免每轮 prefill 整段 prefix。
-
-        Returns
-        -------
-        TreeDraftResult
-            摊平后的 draft 树(token_ids / parent)。
-        """
-        # * [EAGLE3 新增 vs EAGLE1/2] AR 建树:draft 自回归(KV fork + feature 递归);
-        # 非 AR 则像 eagle1/eagle2 那样每节点回调 draft_topk_fn。
-        if self.autoregressive_draft:
-            # AR:decode 轮用上一轮 extend 后的 root_logits/root_hidden/kv
-            if draft_state is not None:
-                if draft_state.prefix_len != int(prefix_ids.shape[1]):
-                    raise ValueError(
-                        f"draft_state.prefix_len {draft_state.prefix_len} != "
-                        f"prefix len {prefix_ids.shape[1]}"
-                    )
-                root_logits = draft_state.root_logits
-                root_hidden = draft_state.root_hidden
-                root_kv = draft_state.kv
-            else:
-                if acts_all is None:
-                    acts_all = self._refresh_all(prefix_ids)
-                elif acts_all.shape[1] != prefix_ids.shape[1]:
-                    raise ValueError(
-                        f"acts_all seq len {acts_all.shape[1]} != prefix len {prefix_ids.shape[1]}"
-                    )
-                root_logits, root_hidden, root_kv = self.draft_model.prefill(
-                    prefix_ids, acts_all
-                )
-            return expand_draft_tree_ar(
-                self.cfg,
-                self.draft_model,
-                root_logits,
-                root_hidden,
-                root_kv,
-                int(prefix_ids.shape[1]) - 1,
-                device=prefix_ids.device,
+        """用 AR draft 的 KV 和递归 hidden 构造 top-k 树。"""
+        if draft_state.prefix_len != int(prefix_ids.shape[1]):
+            raise ValueError(
+                f"draft_state.prefix_len {draft_state.prefix_len} != "
+                f"prefix len {prefix_ids.shape[1]}"
             )
-        # 非 AR:每步只调 draft_topk_fn(parent_token);可选每节点重算 target act
-        if root_acts is not None:
-            h_root = root_acts
-        else:
-            h_root = self._refresh_hidden(prefix_ids)
-        refresh = self._refresh_hidden if self.refresh_target_each_node else None
-        # * [继承自 EAGLE2] cumulative=累计概率 beam 剪枝;static=EAGLE1 静态 BFS
-        expand_fn = (
-            expand_draft_tree_topk
-            if self.cfg.tree_expand_mode == "cumulative"
-            else expand_draft_tree
-        )
-        return expand_fn(
+        return expand_draft_tree_ar(
             self.cfg,
-            h_root,
-            last_token_id,
-            self.draft_topk_fn,
-            target_hidden_refresh=refresh,
-            initial_prefix_ids=prefix_ids if self.refresh_target_each_node else None,
+            self.draft_model,
+            draft_state.root_logits,
+            draft_state.root_hidden,
+            draft_state.kv,
+            int(prefix_ids.shape[1]) - 1,
+            device=prefix_ids.device,
         )
 
     # ------------------------------------------------------------------
@@ -338,10 +226,7 @@ class Eagle3SglGenerator:
         self,
         full_prefix_ids: torch.LongTensor,
         past_before: Any,
-        last_token_id: torch.LongTensor,
         recovery_logits: Optional[torch.Tensor] = None,
-        root_acts: Optional[torch.Tensor] = None,
-        acts_all: Optional[torch.Tensor] = None,
         draft_state: Optional[_DraftKvState] = None,
     ) -> torch.LongTensor:
         """单轮投机，返回本轮采纳的 token [1, A]。
@@ -352,22 +237,14 @@ class Eagle3SglGenerator:
             当前已接受序列 [1, P](prompt + 此前各轮 append)。
         past_before
             target 对 full_prefix_ids 的 KV cache;extend verify 在其上临时 extend 后 crop。
-        last_token_id
-            前缀末 token [1, 1];非 AR 建树时作为 draft 根层父 token。
         recovery_logits
             前缀末位预测下一 token 的 logits [V];full_model_tree 必填(根层 parent→child 接受)。
-        root_acts
-            末 token 多层 act [1, n*H];非 AR 建树根条件(透传省重算)。
-        acts_all
-            全前缀各位置 act [1, P, n*H];AR draft prefill fallback。
         draft_state
-            增量维护的 draft KV + root 输出;AR 路径避免每轮 prefill 整段 prefix。
+            增量维护的 draft KV + root 输出,避免每轮 prefill 整段 prefix。
         """
         device = full_prefix_ids.device
-        # ① 建树(AR 或 topk_fn)
-        draft_res = self._build_tree(
-            full_prefix_ids, last_token_id, root_acts, acts_all, draft_state
-        )
+        # ① AR 建树
+        draft_res = self._build_tree(full_prefix_ids, draft_state)
         layout = tree_draft_to_verify_layout(draft_res)
 
         past_len = int(full_prefix_ids.shape[1])
@@ -450,38 +327,31 @@ class Eagle3SglGenerator:
         device = input_ids.device
         out_ids = input_ids.clone()
         new_tok = 0
-        # ② Target prefill:KV + 末位 recovery_logits + 全前缀 acts(供 draft / 非 AR)
+        # ② Target prefill:KV + 末位 recovery_logits + 全前缀 act
         att = torch.ones_like(out_ids, device=device)
         out0 = self.target_m(
             out_ids, attention_mask=att, use_cache=True, output_hidden_states=True
         )
         past = out0.past_key_values
         recovery_logits = out0.logits[0, -1]
-        # 全前缀各位置token的多层act特征(AR draft prefill);末 token act 供非 AR 路径
         acts_all = select_eagle_acts_from_hidden_states(
             out0.hidden_states, self.eagle_layers, last_token_only=False
         )
-        root_acts = acts_all[:, -1, :]
-        draft_state: Optional[_DraftKvState] = None
-        if self.autoregressive_draft:
-            # ③ Draft 与 prefix 对齐的整段 prefill(EAGLE shift 在 draft_model.prefill 内)
-            d_logits, d_hidden, d_kv = self.draft_model.prefill(out_ids, acts_all)
-            draft_state = _DraftKvState(
-                kv=d_kv,
-                prefix_len=int(out_ids.shape[1]),
-                root_logits=d_logits,
-                root_hidden=d_hidden,
-            )
+        # ③ AR draft prefill,建立首轮使用的 KV 和递归 hidden
+        d_logits, d_hidden, d_kv = self.draft_model.prefill(out_ids, acts_all)
+        draft_state = _DraftKvState(
+            kv=d_kv,
+            prefix_len=int(out_ids.shape[1]),
+            root_logits=d_logits,
+            root_hidden=d_hidden,
+        )
 
         while new_tok < max_new_tokens:
             if eos_token_id is not None and out_ids[0, -1].item() == eos_token_id:
                 break  # 已到 EOS,停止
-            last_t = out_ids[:, -1:]
-            # ④ 单轮:建树 → verify → append
-            # * spec_decoding/eagle3_sgl/tree_verify_full.py 中 _match_one_leaf_path
-            # * 跟节点使用 recovery_logits 来进行验证, 非跟节点使用forward出来的logits进行验证
+            # ④ 单轮:AR 建树 → verify → append
             append = self.generate_step_payload(
-                out_ids, past, last_t, recovery_logits, root_acts, acts_all, draft_state
+                out_ids, past, recovery_logits, draft_state
             )
             # 把 append 重放进 target KV.带 past 时 attention_mask 必须覆盖 [past + append] 全长,
             # 否则 append 不会 attend 到前缀 → out_sync.logits(recovery_logits)错.
@@ -505,25 +375,22 @@ class Eagle3SglGenerator:
                 out_sync.hidden_states, self.eagle_layers, last_token_only=False
             )
             acts_all = torch.cat([acts_all, append_acts], dim=1)
-            root_acts = acts_all[:, -1, :]
-            if self.autoregressive_draft and draft_state is not None:
-                # draft extend:对本轮 append 增量写 KV;act 段与 EAGLE shift 对齐
-                p_old = draft_state.prefix_len
-                p_new = int(out_ids.shape[1]) + int(append.shape[1])
-                # acts_all[:, t] 是 target 在位置 t 的多层 act;draft 在位置 t 消费 target生成的acts[:, t-1]
-                ext_acts = acts_all[:, p_old - 1 : p_new - 1, :]
-                d_logits, d_hidden, d_kv = self.draft_model.extend_tokens(
-                    append,
-                    ext_acts,
-                    draft_state.kv,
-                    p_old - 1,  # RoPE 从旧 prefix 末位置续
-                )
-                draft_state = _DraftKvState(
-                    kv=d_kv,
-                    prefix_len=p_new,
-                    root_logits=d_logits,
-                    root_hidden=d_hidden,
-                )
+            # AR draft 增量写入本轮接受的 token,供下一轮建树复用
+            p_old = draft_state.prefix_len
+            p_new = int(out_ids.shape[1]) + int(append.shape[1])
+            ext_acts = acts_all[:, p_old - 1 : p_new - 1, :]
+            d_logits, d_hidden, d_kv = self.draft_model.extend_tokens(
+                append,
+                ext_acts,
+                draft_state.kv,
+                p_old - 1,
+            )
+            draft_state = _DraftKvState(
+                kv=d_kv,
+                prefix_len=p_new,
+                root_logits=d_logits,
+                root_hidden=d_hidden,
+            )
             out_ids = torch.cat([out_ids, append], dim=1)
             new_tok += int(append.numel())
             self.n_rounds += 1

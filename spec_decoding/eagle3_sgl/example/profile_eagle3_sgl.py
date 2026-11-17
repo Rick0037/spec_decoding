@@ -104,10 +104,6 @@ def main() -> None:
     p.add_argument(
         "--dtype", default="float16", choices=["float16", "bfloat16", "float32"]
     )
-    p.add_argument(
-        "--no-autoregressive-draft", dest="autoregressive_draft", action="store_false"
-    )
-    p.set_defaults(autoregressive_draft=True)
     p.add_argument("--top-n", type=int, default=25)
     p.add_argument("--trace-out", default="")
     p.add_argument("--report-out", default="")
@@ -128,7 +124,6 @@ def main() -> None:
         Eagle3SglConfig,
         Eagle3SglGenerator,
         build_eagle3_sgl_draft,
-        make_eagle3_sgl_draft_topk_fn,
     )
     import spec_decoding.eagle3_sgl.runner as runner_mod
 
@@ -165,15 +160,7 @@ def main() -> None:
         device=device,
         dtype=dtype,
     )
-    draft_topk_fn = make_eagle3_sgl_draft_topk_fn(draft, topk=args.topk)
-    gen = Eagle3SglGenerator(
-        target,
-        cfg,
-        draft_topk_fn,
-        draft_model=draft,
-        autoregressive_draft=args.autoregressive_draft,
-    )
-
+    gen = Eagle3SglGenerator(target, cfg, draft)
     if getattr(tok, "chat_template", None):
         out = tok.apply_chat_template(
             [{"role": "user", "content": args.prompt}],

@@ -1,12 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-EAGLE3 超参:EAGLE3 的多层 act 特征 + EAGLE1 的静态 top-k 树 + 树掩码 verify。
+EAGLE3 超参:多层 act 特征 + 自回归 draft 建树 + 树掩码 verify。
 
-相对 eagle(EAGLE1):
-- draft 的条件特征改为 target 的 低/中/高 多层 hidden 拼接(eagle_layers),而非单层 hidden;
-- 因此用 eagle_layers / resolve_eagle_layers 取代 EAGLE1 的 hidden_layer_index。
-
-树与 verify(topk/num_steps/max_tree_nodes/verify_mode/verify_attn_backend)与 EAGLE1 一致。
+- draft 条件特征为 target 低/中/高多层 hidden 拼接(eagle_layers);
+- topk/num_steps/max_tree_nodes 控制自回归 draft 树规模。
 """
 
 from __future__ import annotations
@@ -30,17 +27,9 @@ class Eagle3SglConfig:
     num_steps: int = 8
     """从根出发的 draft 深度。"""
     max_tree_nodes: int = 64
-    """draft 节点上限:cumulative 模式按累计分剪枝、static 模式按 BFS 顺序截断。"""
-    tree_expand_mode: str = "cumulative"
-    """
-    * [继承自 EAGLE2] 树展开策略开关(eagle2 叫 bfs,这里叫 static):
-    cumulative(默认,EAGLE-2 能力):每层累计 log 概率 + 全局 top-K beam,末尾按累计分剪枝,
-        在相同节点预算下把算力集中到 draft 更有把握的分支(接受率更高)。
-    static:EAGLE-1 静态 top-k BFS 树(不看分数、按 BFS 顺序填满 max_tree_nodes)。
-    """
+    """draft 节点上限(按 BFS 顺序截断)。"""
     eagle_layers: Optional[List[int]] = None
-    """* [EAGLE3 新增 vs EAGLE1/2] 作为 draft 条件的 target 多层(低/中/高)hidden 下标;
-    EAGLE1/2 只用单层 hidden,EAGLE3 拼多层;None 时用 default_eagle_layers。"""
+    """作为 draft 条件的 target 多层 hidden 下标;None 时用 default_eagle_layers。"""
     verify_mode: str = "full_model_tree"
     """
     full_model_tree(推荐):一次 全层 target forward + 树掩码(tree_verify_full)。
@@ -62,8 +51,6 @@ class Eagle3SglConfig:
             raise ValueError("topk must be >= 1")
         if self.num_steps < 1:
             raise ValueError("num_steps must be >= 1")
-        if self.tree_expand_mode not in ("cumulative", "static"):
-            raise ValueError("tree_expand_mode must be cumulative or static")
         if self.verify_mode not in (
             "full_model_tree",
             "reference_paths",

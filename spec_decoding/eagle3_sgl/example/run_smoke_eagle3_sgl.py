@@ -19,7 +19,6 @@ from spec_decoding.eagle3_sgl import (
     Eagle3SglConfig,
     Eagle3SglGenerator,
     build_eagle3_sgl_draft,
-    make_eagle3_sgl_draft_topk_fn,
 )
 
 
@@ -54,18 +53,9 @@ def main() -> None:
     layers = cfg.resolve_eagle_layers(n_layers)
 
     # 轻量 EAGLE3 draft(多层 act 条件),复用 target embedding/lm_head
-    draft = build_eagle3_sgl_draft(
-        target, layers, device=device
-    )
-    draft_topk_fn = make_eagle3_sgl_draft_topk_fn(draft, topk=args.topk)
+    draft = build_eagle3_sgl_draft(target, layers, device=device)
 
-    gen = Eagle3SglGenerator(
-        target,
-        cfg,
-        draft_topk_fn,
-        draft_model=draft,
-        autoregressive_draft=True,
-    )
+    gen = Eagle3SglGenerator(target, cfg, draft)
     input_ids = torch.tensor([[1, 2, 3]], device=device)
     out = gen.generate(input_ids, max_new_tokens=args.max_new_tokens)
     print(

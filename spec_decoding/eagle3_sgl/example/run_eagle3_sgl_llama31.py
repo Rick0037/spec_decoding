@@ -12,8 +12,7 @@
 
 EAGLE3 draft 条件 = target 低/中/高多层 hidden 拼接(eagle_layers,默认 [2, L//2, L-3])。
 verify 用复用前缀 KV 的 extend 树掩码 verify(full_model_tree:HF sdpa 或 triton_tree kernel,
-parent→child 接受 + recovery_logits root 接受),无损(与干净贪心一致)。draft 不逐节点刷新
-target(refresh_target_each_node=False),适合大模型。
+parent→child 接受 + recovery_logits root 接受),无损(与干净贪心一致)。
 
 跑法:
  HF_HUB_OFFLINE=1 HF_HOME=/root/autodl-tmp/hf_cache PYTHONPATH=. .venv/bin/python \
@@ -73,7 +72,6 @@ def main() -> None:
         Eagle3SglConfig,
         Eagle3SglGenerator,
         build_eagle3_sgl_draft,
-        make_eagle3_sgl_draft_topk_fn,
     )
 
     tok, target, target_id = _load_target(command_line_args.target, device, dtype)
@@ -84,16 +82,13 @@ def main() -> None:
     draft_vocab_size = int(
         json.load(open(draft_cfg_path)).get("draft_vocab_size", 32000)
     )
-    import pdb
 
-    pdb.set_trace()
     draft_bin = hf_hub_download(command_line_args.eagle3_draft, "pytorch_model.bin")
 
     cfg = Eagle3SglConfig(
         topk=8,
         num_steps=8,
         max_tree_nodes=64,
-        tree_expand_mode="cumulative",
         verify_mode="full_model_tree",
         verify_attn_backend="auto",
     )
@@ -112,16 +107,7 @@ def main() -> None:
         device=device,
         dtype=dtype,
     )
-    draft_topk_fn = make_eagle3_sgl_draft_topk_fn(draft, topk=8)
-
-    # 自回归 draft(KV + RoPE + feature 递归,对齐官方 EAGLE3 AR 推理)
-    gen = Eagle3SglGenerator(
-        target,
-        cfg,
-        draft_topk_fn,
-        draft_model=draft,
-        autoregressive_draft=True,
-    )
+    gen = Eagle3SglGenerator(target, cfg, draft)
 
     # 输入(instruct 模型套 chat template,否则 OOD)
     if getattr(tok, "chat_template", None):

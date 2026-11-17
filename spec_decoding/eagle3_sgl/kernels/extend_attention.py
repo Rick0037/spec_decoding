@@ -153,7 +153,7 @@ def _fwd_kernel(
         mask_n = (start_n + offs_n) < cur_seq_len_prefix
 
         # 前缀默认全可见;SKIP_PREFIX_CUSTOM_MASK=True(树 verify 的用法)时
-        # custom_mask 只描述树内 L×L 段,前缀段不查 mask。
+        # custom_mask 只描述树内 L*L 段,前缀段不查 mask。
         final_mask = mask_m[:, None] & mask_n[None, :]
         if USE_CUSTOM_MASK and not SKIP_PREFIX_CUSTOM_MASK:
             custom_mask = tl.load(

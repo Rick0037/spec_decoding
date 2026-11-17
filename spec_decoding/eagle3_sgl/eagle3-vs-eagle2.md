@@ -219,7 +219,7 @@ EAGLE3 用早/中/晚三层信息做 draft 条件,比 EAGLE2 单层末 hidden �
 | Attention 输入维 | H | **2H**(qkv 输入 = concat(norm(emb), norm(hidden))) |
 | RoPE | 无(单 token S=1 时无影响) | **有**(prefill / step / extend 均带 RoPE) |
 | 输出头 | 复用 target `lm_head` | 独立 `lm_head(draft_vocab)` + `hot_token_id = d2t + arange` 映射回 target id |
-| AR 接口 | 无 | `prefill` / `step` / `extend` / `extend_tokens` / `topk_target_ids` |
+| AR 接口 | 无 | `prefill` / `step` / `extend` / `extend_tokens` / `convert_to_target_topk_token_ids` |
 
 ### 3. 树展开策略
 

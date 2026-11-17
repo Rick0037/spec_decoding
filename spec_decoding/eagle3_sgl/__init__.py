@@ -1,19 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-spec_decoding.eagle3_sgl —— EAGLE3 多层特征 + EAGLE1 静态树 + 树掩码 verify。
+spec_decoding.eagle3_sgl —— EAGLE3 多层特征 + 自回归 draft + 树掩码 verify。
 
-= EAGLE1 的静态 top-k 树 + full_model_tree/reference_paths tree verify+ EAGLE3 的target 低/中/高多层 hidden 拼接作为 draft 条件特征。
-
-相对 eagle(EAGLE1) 的唯一区别在 feature 侧:
-- draft 条件特征 = target 多层 act 拼接(eagle_layers),经 fc((1+n)H→H) 融合,
-  而非单层 hidden(fc(2H→H));
-- 取特征用 hidden.forward_target_eagle_acts,配置用 eagle_layers / resolve_eagle_layers。
-
-树与 verify 与 eagle 完全一致(topk 静态展开 + 树掩码一次性 verify / 逐叶 verify)。
+draft 条件特征 = target 低/中/高多层 act 拼接(eagle_layers),经 fc 融合;
+draft 自回归建树(携带自己的 KV,并沿路径递归更新 hidden)。
 
 外层调度:runner.Eagle3SglGenerator。
-draft:draft_model.build_eagle3_sgl_draft + make_eagle3_sgl_draft_topk_fn(轻量、复用
-target embedding/lm_head + fc + 1 层 decoder、首层跳过 input_layernorm)。
+draft:draft_model.build_eagle3_sgl_draft(复用 target embedding/lm_head)。
 """
 
 from __future__ import annotations
@@ -23,9 +16,7 @@ from typing import Any
 from .config import Eagle3SglConfig
 from .tree_draft import (
     TreeDraftResult,
-    expand_draft_tree,
     expand_draft_tree_ar,
-    expand_draft_tree_topk,
     tree_draft_to_verify_layout,
 )
 from .tree_verify_mask import (
@@ -38,13 +29,10 @@ __all__ = [
     "Eagle3SglGenerator",
     "Eagle3SglDraftModel",
     "build_eagle3_sgl_draft",
-    "make_eagle3_sgl_draft_topk_fn",
     "load_eagle3_draft_weights",
     "TreeDraftResult",
     "TreeVerifyLayout",
     "build_tree_cross_attn_bias_with_prefix",
-    "expand_draft_tree",
-    "expand_draft_tree_topk",
     "expand_draft_tree_ar",
     "forward_target_eagle_acts",
     "tree_draft_to_verify_layout",
@@ -64,7 +52,6 @@ def __getattr__(name: str) -> Any:
     if name in (
         "Eagle3SglDraftModel",
         "build_eagle3_sgl_draft",
-        "make_eagle3_sgl_draft_topk_fn",
         "load_eagle3_draft_weights",
     ):
         from . import draft_model as dm

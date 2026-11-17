@@ -145,7 +145,7 @@ for start_n in range(0, cur_seq_len_prefix, BLOCK_N):
     通过 kv_indices 从 K_Buffer / V_Buffer 取 K/V
     qk = scale * (Q @ K^T)   [+ logit_cap / xai_temperature]
     应用 final_mask:
-      - 默认: 有效 query × 有效 key
+      - 默认: 有效 query * 有效 key
       - USE_CUSTOM_MASK 且 not SKIP_PREFIX_CUSTOM_MASK: 与 custom_mask 相与
       - SLIDING_WINDOW_SIZE > 0: 滑动窗口
     在线 softmax 累加到 acc, deno, e_max

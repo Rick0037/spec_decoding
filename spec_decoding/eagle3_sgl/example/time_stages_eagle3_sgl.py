@@ -101,7 +101,6 @@ def main():
         Eagle3SglConfig,
         Eagle3SglGenerator,
         build_eagle3_sgl_draft,
-        make_eagle3_sgl_draft_topk_fn,
     )
     import spec_decoding.eagle3_sgl.runner as R
 
@@ -125,13 +124,7 @@ def main():
         device=device,
         dtype=dtype,
     )
-    gen = Eagle3SglGenerator(
-        target,
-        cfg,
-        make_eagle3_sgl_draft_topk_fn(draft, topk=args.topk),
-        draft_model=draft,
-        autoregressive_draft=True,
-    )
+    gen = Eagle3SglGenerator(target, cfg, draft)
 
     out = tok.apply_chat_template(
         [{"role": "user", "content": args.prompt}],

@@ -1,334 +1,22 @@
-# SPDX-License-Identifier: Apache-2.0
-"""
-EAGLE3-SGL 建树:同一文件三种展开策略,由 runner 按 autoregressive_draft /
-tree_expand_mode 分发:
-
-- expand_draft_tree     :EAGLE1 静态 top-k BFS 树(不看分数,按 BFS 顺序填满 max_tree_nodes)。
-- expand_draft_tree_topk:累计 log 概率 beam + 按分数全局剪枝。
-- expand_draft_tree_ar  :自回归建树(draft 带 KV cache + feature 递归)。
-
-draft_topk_fn:(多层 act [B, n*H], 父节点 token id) → topk ids + 分数。
-分数:static 不参与建树;cumulative 由 _topk_log_probs 规范化为 log 概率。
-"""
+"""EAGLE3 自回归 draft 建树：携带 KV cache，并沿树路径递归更新 hidden。"""
 
 from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Tuple
+from typing import List
 
 import torch
-import torch.nn.functional as F
 
 from .config import Eagle3SglConfig
 
 
 @dataclass
 class TreeDraftResult:
-    """展开后的树,摊平为 TreeVerifyLayout 所需字段."""
+    """摊平后的 draft 树。"""
 
     token_ids: List[int]
     parent: List[int]
-
-
-DraftTopkFn = Callable[
-    [torch.Tensor, torch.LongTensor],
-    Tuple[torch.Tensor, torch.Tensor],
-]
-"""(hidden[B,H], parent_token_id[B,1]) -> (topk_ids[B,K], topk_scores[B,K])
-
-EAGLE1 只用 topk_ids;topk_scores 不参与建树, 其在eagle2用到。
-"""
-
-
-def _topk_ids(topk_ids: torch.Tensor, k: int) -> List[int]:
-    """取 draft_topk_fn 返回的前 k 个候选 token id(忽略分数)."""
-    return [int(t) for t in topk_ids[0, :k].tolist()]
-
-
-def _expand_hidden(
-    hidden: torch.Tensor,
-    path: List[int],
-    *,
-    target_hidden_refresh: Optional[Callable[[torch.LongTensor], torch.Tensor]],
-    initial_prefix_ids: Optional[torch.LongTensor],
-) -> torch.Tensor:
-    """扩展子节点时的 draft 条件 hidden(非 AR 建树用)。
-
-    Parameters
-    ----------
-    hidden
-        父节点沿用的 act [1, n*H](或末 token act)。
-    path
-        从根到当前节点的 token 路径(用于拼 initial_prefix_ids + path)。
-    target_hidden_refresh
-        若给定:对 prefix + path 重算 target 末 token act(接受率更高)。
-    initial_prefix_ids
-        真实已接受前缀 [1, P];与 target_hidden_refresh 成对使用。
-
-    Returns
-    -------
-    Tensor
-        子节点扩展用的条件 hidden [1, n*H]。
-    """
-    if target_hidden_refresh is not None and initial_prefix_ids is not None:
-        device = hidden.device
-        # 用所有已有tokens + draft tree path作为输入到target推理,取末token多层 act
-        ext = torch.cat(
-            [
-                initial_prefix_ids,
-                torch.tensor([path], device=device, dtype=torch.long),
-            ],
-            dim=1,
-        )
-        return target_hidden_refresh(ext)
-    return hidden
-
-
-def expand_draft_tree(
-    cfg: Eagle3SglConfig,
-    root_hidden: torch.Tensor,
-    root_parent_token_id: torch.LongTensor,
-    draft_topk_fn: DraftTopkFn,
-    *,
-    target_hidden_refresh: Optional[Callable[[torch.LongTensor], torch.Tensor]] = None,
-    initial_prefix_ids: Optional[torch.LongTensor] = None,
-) -> TreeDraftResult:
-    """
-    EAGLE1 静态 top-k 树:每个节点固定展开 top-k 子节点,按 BFS 顺序填到
-    max_tree_nodes 为止。
-
-    Parameters
-    ----------
-    root_hidden
-        Target 在 当前前缀最后一个 token 处的 hidden,[1, H]。
-    root_parent_token_id
-        当前序列 最后一个已生成 token id,[1, 1]。
-    draft_topk_fn
-        见 DraftTopkFn(EAGLE1 仅使用其 token id 输出)。
-    target_hidden_refresh / initial_prefix_ids
-        若给定:扩展子节点时用前缀 + 路径刷新 target hidden。
-    """
-    K = cfg.topk
-    if K < 1:
-        raise ValueError("topk invalid")
-    if cfg.max_tree_nodes < 1:
-        raise ValueError("max_tree_nodes invalid")
-
-    device = root_hidden.device
-    token_ids: List[int] = []
-    parent: List[int] = []
-    depth: List[int] = []
-    # root_parent_token_id = is,对其作topk spec
-    # root_toks = [Paris, the]
-    # 根层:对前缀末 token做一次 draft_topk_fn(decoding阶段),得到 K 个候选子节点
-    topk_ids, _ = draft_topk_fn(root_hidden, root_parent_token_id)
-    root_toks = _topk_ids(topk_ids, K)
-
-    # 队列元素:(tree_idx, depth, hidden, path)
-    # 设 cfg.topk=2,num_steps=3,max_tree_nodes=16,前缀是 "The capital of France is",根 token = "is".
-    # token_ids = [Paris, the, ., ,, capital, city, .., .., .., .., .., .., .., ..]
-    # parent    = [ -1,  -1,  0, 0,   1,    1,   2,  2,  3,  3,  4,  4,  5,  5 ]
-    # node_depth= [  1,   1,  2, 2,   2,    2,   3,  3,  3,  3,  3,  3,  3,  3 ]
-    # 把paris和the这俩由prompt末端token生成的topK添加到队列
-    # q=((0,1,root hidden,[Paris]),(1,1,root hidden,[the]))
-    # parent=(-1,-1)
-    q: deque = deque()
-    for t in root_toks:
-        if len(token_ids) >= cfg.max_tree_nodes:
-            break
-        idx = len(token_ids)
-        token_ids.append(t)
-        parent.append(-1)
-        depth.append(1)
-        q.append((idx, 1, root_hidden, [t]))
-
-    # 逐层 BFS:弹出父节点 → 可选刷新 target act → 对父末 token 再 topk → 入队子节点
-    while q and len(token_ids) < cfg.max_tree_nodes:
-        pidx, d, ph, path_p = q.popleft()
-        if d >= cfg.num_steps:
-            continue
-        h = _expand_hidden(
-            ph,
-            path_p,
-            target_hidden_refresh=target_hidden_refresh,
-            initial_prefix_ids=initial_prefix_ids,
-        )
-        tid = torch.tensor([[path_p[-1]]], device=device, dtype=torch.long)
-        # 对paris作draft推理生成topk个候选,对the作draft推理生成topk个候选
-        child_ids, _ = draft_topk_fn(h, tid)
-        # 对paris和the生成的topk添加在q里,对该topk继续bfs生成下一个topk,直到超过了num steps或max tree nodes
-        for ct in _topk_ids(child_ids, K):
-            if len(token_ids) >= cfg.max_tree_nodes:
-                break
-            cidx = len(token_ids)
-            token_ids.append(ct)
-            parent.append(pidx)
-            depth.append(d + 1)
-            q.append((cidx, d + 1, h, path_p + [ct]))
-    # token_ids = [Paris, the, ., ,, capital, city, .., .., .., .., .., .., .., ..]
-    # parent    = [ -1,  -1,  0, 0,   1,    1,   2,  2,  3,  3,  4,  4,  5,  5 ]
-    # node_depth= [  1,   1,  2, 2,   2,    2,   3,  3,  3,  3,  3,  3,  3,  3 ]
-    return TreeDraftResult(
-        token_ids=token_ids,  # bfs式地保存了树里所有token id
-        parent=parent,  # bfs式地保存了树里所有token的parent id
-    )
-
-
-# =============================================================================
-# EAGLE-2 风格 累计概率剪枝(cumulative beam)—— 相对EAGLE1 静态树多出来的能力:
-# 每层把 cum_logp(child) = cum_logp(parent) + log p(child|parent) 作为分数,只保留全局
-# 累计分最高的 K 条活跃路径(beam);展开完再按累计分把节点数压到 max_tree_nodes(保留祖先,
-# 保证 parent 链有效).这样在相同节点预算下把算力集中到draft 更有把握的分支,接受率更高.
-# =============================================================================
-@dataclass
-class _FrontierNode:  # * [继承自 EAGLE2] beam 活跃节点
-    tree_idx: int
-    cum_logp: float
-    hidden: torch.Tensor
-    path: List[int]
-
-
-def _topk_log_probs(
-    topk_ids: torch.Tensor,
-    topk_scores: torch.Tensor,
-    k: int,
-) -> Tuple[List[int], List[float]]:
-    """* [继承自 EAGLE2] 把 draft_topk_fn 返回的分数规范为 log 概率。
-
-    EAGLE3 的 make_eagle3_sgl_draft_topk_fn 返回原始 logits 的 top-k 分数,
-    走上半分支:在 top-k 子集上 log_softmax 成可沿路径累加的条件 log 概率;
-    传入已全为非正(如 EAGLE2 的 log_softmax 输出)则直接透传。
-    """
-    ids = topk_ids[0, :k].tolist()
-    sc = topk_scores[0, :k].float()
-    if sc.numel() == 0:
-        return [], []
-    if sc.max() > 0:
-        # 原始 logits:在 top-k 子集上做 log_softmax,得到可沿路径累加的条件 log 概率
-        logps = F.log_softmax(sc, dim=-1).tolist()
-    else:
-        # 已是 log 概率(如 log_softmax 输出)
-        logps = sc.tolist()
-    return [int(t) for t in ids], [float(x) for x in logps]
-
-
-def _compact_tree_by_score(
-    token_ids: List[int],
-    parent: List[int],
-    cum_log_probs: List[float],
-    max_nodes: int,
-) -> Tuple[List[int], List[int]]:
-    """* [继承自 EAGLE2] 按累计分保留至多 max_nodes 个节点,并带上其祖先(保证 parent 链有效)."""
-    n = len(token_ids)
-    if n <= max_nodes:
-        return token_ids, parent
-
-    # 先按 cum_log_prob 取 top max_nodes 个点,再把每个点的整条祖先链并入 keep
-    ranked = sorted(range(n), key=lambda i: cum_log_probs[i], reverse=True)
-    keep: set[int] = set()
-    for i in ranked[:max_nodes]:
-        j = i
-        while j >= 0:
-            keep.add(j)
-            j = parent[j]
-
-    # 重编号 parent,满足一个能正常表示树的顺序,使剪枝后仍是一棵合法树
-    order = sorted(keep)
-    old_to_new = {old: new for new, old in enumerate(order)}
-    return (
-        [token_ids[i] for i in order],
-        [old_to_new[parent[i]] if parent[i] >= 0 else -1 for i in order],
-    )
-
-
-def expand_draft_tree_topk(
-    cfg: Eagle3SglConfig,
-    root_hidden: torch.Tensor,
-    root_parent_token_id: torch.LongTensor,
-    draft_topk_fn: DraftTopkFn,
-    *,
-    target_hidden_refresh: Optional[Callable[[torch.LongTensor], torch.Tensor]] = None,
-    initial_prefix_ids: Optional[torch.LongTensor] = None,
-) -> TreeDraftResult:
-    """
-    * [继承自 EAGLE2] EAGLE-2 风格 draft 树:每层累计 log 概率 + 全局 top-K beam,最后再按分数截断。
-
-    Parameters 同 expand_draft_tree。要点:
-
-    - 每步扩展:cum_logp(child) = cum_logp(parent) + log p(child|parent);
-    - 每步只保留累计分最高的 topk 条活跃路径(beam);
-    - 全部步结束后,若节点数超过 max_tree_nodes,按累计分做全局剪枝(保留祖先)。
-
-    root_hidden 此处即 EAGLE3 的多层 act 特征([1, n*H]);draft_topk_fn 内部会用它做条件化。
-    """
-    K = min(cfg.topk, cfg.max_tree_nodes) if cfg.max_tree_nodes > 0 else cfg.topk
-    if K < 1:
-        raise ValueError("topk or max_tree_nodes invalid")
-
-    device = root_hidden.device
-    token_ids: List[int] = []
-    parent: List[int] = []
-    node_depth: List[int] = []
-    cum_log_probs: List[float] = []
-
-    topk_ids, topk_scores = draft_topk_fn(root_hidden, root_parent_token_id)
-    root_toks, root_lps = _topk_log_probs(topk_ids, topk_scores, K)
-
-    # frontier:当前每条 beam 的路径末端叶节点(每步只保留累计分最高的 K 条路径)
-    frontier: List[_FrontierNode] = []
-    for t, lp in zip(root_toks, root_lps):
-        idx = len(token_ids)
-        token_ids.append(t)
-        parent.append(-1)
-        node_depth.append(1)
-        cum_log_probs.append(lp)
-        path = [t]
-        h = _expand_hidden(
-            root_hidden,
-            path,
-            target_hidden_refresh=target_hidden_refresh,
-            initial_prefix_ids=initial_prefix_ids,
-        )
-        frontier.append(_FrontierNode(idx, lp, h, path))
-
-    # 第 2..num_steps 层:每条 beam 再扩 K 个子节点,摊平进 token_ids;全局只留 cum_logp 最高的 K 条 beam
-    for _step in range(1, cfg.num_steps):
-        if not frontier:
-            break
-        # 只留K条路径
-        candidates: List[_FrontierNode] = []
-        for node in frontier:
-            if node_depth[node.tree_idx] >= cfg.num_steps:
-                continue
-            tid = torch.tensor([[node.path[-1]]], device=device, dtype=torch.long)
-            child_ids, child_scores = draft_topk_fn(node.hidden, tid)
-            ctoks, clps = _topk_log_probs(child_ids, child_scores, K)
-            for t, dlp in zip(ctoks, clps):
-                new_lp = node.cum_logp + dlp
-                path_c = node.path + [t]
-                h = _expand_hidden(
-                    node.hidden,
-                    path_c,
-                    target_hidden_refresh=target_hidden_refresh,
-                    initial_prefix_ids=initial_prefix_ids,
-                )
-                idx = len(token_ids)
-                token_ids.append(t)
-                parent.append(node.tree_idx)
-                node_depth.append(node_depth[node.tree_idx] + 1)
-                cum_log_probs.append(new_lp)
-                candidates.append(_FrontierNode(idx, new_lp, h, path_c))
-
-        candidates.sort(key=lambda n: n.cum_logp, reverse=True)
-        frontier = candidates[:K]
-
-    # 步数跑完后若节点超预算:按分数剪枝并保留祖先链
-    token_ids, parent = _compact_tree_by_score(
-        token_ids, parent, cum_log_probs, cfg.max_tree_nodes
-    )
-
-    return TreeDraftResult(token_ids=token_ids, parent=parent)
 
 
 def expand_draft_tree_ar(
@@ -341,76 +29,69 @@ def expand_draft_tree_ar(
     *,
     device: torch.device,
 ) -> TreeDraftResult:
-    """* [EAGLE3 新增 vs EAGLE1/2] 自回归(KV cache + RoPE + feature 递归)静态 top-k BFS 树展开。
-
-    与 expand_draft_tree 树形状相同(静态 BFS),但 draft step()带状态,
-    条件 hidden 在 draft 内部递归更新,而非每节点回调 draft_topk_fn。
-
-    Parameters
-    ----------
-    cfg
-        树超参:topk / num_steps / max_tree_nodes。
-    draft_model
-        Eagle3SglDraftModel;提供 step / topk_target_ids。
-    root_logits
-        draft prefill 末步 logits [1, V];根层 topk 来源。
-    root_hidden
-        draft prefill 末步 hidden [1, H];各 BFS 分支初始 cond。
-    root_kv
-        draft prefill 后的 KV (k, v);BFS 分支 fork 时各路径各自 extend。
-    past_len
-        target 前缀长度 P 的末位置索引(RoPE 基准);树内 depth=d 的 step 位置 = past_len-1+d。
-    device
-        计算设备。
-    """
-    K = cfg.topk
-    if K < 1 or cfg.max_tree_nodes < 1:
+    """按 BFS 顺序构造 top-k 树，每个分支独立延续自己的 hidden 和 KV。"""
+    topk = cfg.topk
+    if topk < 1 or cfg.max_tree_nodes < 1:
         raise ValueError("invalid topk/max_tree_nodes")
 
     token_ids: List[int] = []
     parent: List[int] = []
-    depth: List[int] = []
+    root_topk_ids, _ = draft_model.convert_to_target_topk_token_ids(root_logits, topk)
+    root_tokens = [int(token) for token in root_topk_ids[0, :topk].tolist()]
 
-    h_root, kv_root = root_hidden, root_kv
-    # 根层候选来自 prefill 末步 logits 的 top-K(可能经 d2t 映到 target id)
-    root_idx, _ = draft_model.topk_target_ids(root_logits, K)
-    root_toks = [int(t) for t in root_idx[0, :K].tolist()]
-
-    q: deque = deque()
-    for t in root_toks:
+    queue = deque()
+    for token_id in root_tokens:
         if len(token_ids) >= cfg.max_tree_nodes:
             break
-        idx = len(token_ids)
-        token_ids.append(t)
+        node_index = len(token_ids)
+        token_ids.append(token_id)
         parent.append(-1)
-        depth.append(1)
-        q.append((idx, 1, t, h_root, kv_root))
+        queue.append((node_index, 1, token_id, root_hidden, root_kv))
 
-    # BFS:每个分支用自己的 (cond, kv) fork;同一父的多个子各拷贝一份状态
-    while q and len(token_ids) < cfg.max_tree_nodes:
-        pidx, d, tok, cond, past = q.popleft()
-        if d >= cfg.num_steps:
-            continue  # 已达最大深度,不再展开
-        tid = torch.tensor([[tok]], device=device, dtype=torch.long)
-        # draft 自回归一步:cond 递归更新为 H,past_kv fork 给各子分支
-        logits, h, kv = draft_model.step(tid, cond, past, past_len - 1 + d)
-        child_idx, _ = draft_model.topk_target_ids(logits, K)
-        for ct in [int(c) for c in child_idx[0, :K].tolist()]:
+    while queue and len(token_ids) < cfg.max_tree_nodes:
+        (
+            parent_index,
+            node_depth,
+            parent_token_id,
+            parent_hidden,
+            parent_kv,
+        ) = queue.popleft()
+        if node_depth >= cfg.num_steps:
+            continue
+
+        draft_input_ids = torch.tensor(
+            [[parent_token_id]], device=device, dtype=torch.long
+        )
+        child_logits, child_hidden, child_kv = draft_model.step(
+            draft_input_ids,
+            parent_hidden,
+            parent_kv,
+            past_len - 1 + node_depth,
+        )
+        child_topk_ids, _ = draft_model.convert_to_target_topk_token_ids(
+            child_logits, topk
+        )
+        for child_token_id in [int(token) for token in child_topk_ids[0, :topk].tolist()]:
             if len(token_ids) >= cfg.max_tree_nodes:
                 break
-            cidx = len(token_ids)
-            token_ids.append(ct)
-            parent.append(pidx)
-            depth.append(d + 1)
-            q.append((cidx, d + 1, ct, h, kv))  # 子分支带走 step 后的 (cond, kv)
+            child_index = len(token_ids)
+            token_ids.append(child_token_id)
+            parent.append(parent_index)
+            queue.append(
+                (
+                    child_index,
+                    node_depth + 1,
+                    child_token_id,
+                    child_hidden,
+                    child_kv,
+                )
+            )
 
     return TreeDraftResult(token_ids=token_ids, parent=parent)
 
 
-def tree_draft_to_verify_layout(
-    draft: TreeDraftResult,
-) -> "TreeVerifyLayout":
-    """TreeDraftResult → TreeVerifyLayout(verify / 掩码构造用)。"""
+def tree_draft_to_verify_layout(draft: TreeDraftResult) -> "TreeVerifyLayout":
+    """把 draft 树转换为 verify 使用的摊平布局。"""
     from .tree_verify_mask import TreeVerifyLayout
 
     return TreeVerifyLayout(

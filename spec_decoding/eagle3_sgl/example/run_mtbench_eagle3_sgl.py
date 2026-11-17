@@ -270,7 +270,7 @@ def _format_report(
     lines = [
         f"[eagle3_sgl mtbench] target={target_id} draft={args.eagle3_draft} "
         f"verify={args.verify_mode}(backend={args.verify_attn_backend}) "
-        f"ar_draft={args.autoregressive_draft} inc_acts=True inc_draft_ext=True "
+        f"ar_draft=True inc_acts=True inc_draft_ext=True "
         f"eagle_layers={eagle_layers} topk={args.topk} num_steps={args.num_steps} "
         f"max_nodes={args.max_tree_nodes} dtype={args.dtype}",
         f"  num_questions={stats.num_questions}  max_new_tokens={args.max_new_tokens}",
@@ -316,10 +316,6 @@ def main() -> None:
         "--dtype", default="float16", choices=["float16", "bfloat16", "float32"]
     )
     p.add_argument(
-        "--no-autoregressive-draft", dest="autoregressive_draft", action="store_false"
-    )
-    p.set_defaults(autoregressive_draft=True)
-    p.add_argument(
         "--skip-baseline",
         action="store_true",
         help="只跑 speculative,跳过 HF greedy baseline",
@@ -345,7 +341,6 @@ def main() -> None:
         Eagle3SglConfig,
         Eagle3SglGenerator,
         build_eagle3_sgl_draft,
-        make_eagle3_sgl_draft_topk_fn,
     )
 
     questions = load_questions(args.question_file, args.num_questions)
@@ -381,14 +376,7 @@ def main() -> None:
         device=device,
         dtype=dtype,
     )
-    draft_topk_fn = make_eagle3_sgl_draft_topk_fn(draft, topk=args.topk)
-    gen = Eagle3SglGenerator(
-        target,
-        cfg,
-        draft_topk_fn,
-        draft_model=draft,
-        autoregressive_draft=args.autoregressive_draft,
-    )
+    gen = Eagle3SglGenerator(target, cfg, draft)
 
     print("[mtbench] running EAGLE3 ...", flush=True)
     spec_stats = _run_mtbench_conversations(
