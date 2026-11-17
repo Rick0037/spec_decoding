@@ -56,9 +56,7 @@ def _load_target(target_id: str, device, dtype):
 def main() -> None:
     parser = argparse.ArgumentParser(description="Real EAGLE3 on Llama-3.1-8B")
     parser.add_argument("--target", default="meta-llama/Llama-3.1-8B-Instruct")
-    parser.add_argument(
-        "--eagle3-draft", default="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B"
-    )
+    parser.add_argument("--eagle3-draft", default="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")
     parser.add_argument(
         "--prompt", default="Explain what speculative decoding is, in two sentences."
     )
@@ -86,6 +84,9 @@ def main() -> None:
     draft_vocab_size = int(
         json.load(open(draft_cfg_path)).get("draft_vocab_size", 32000)
     )
+    import pdb
+
+    pdb.set_trace()
     draft_bin = hf_hub_download(command_line_args.eagle3_draft, "pytorch_model.bin")
 
     cfg = Eagle3SglConfig(
@@ -96,7 +97,8 @@ def main() -> None:
         verify_mode="full_model_tree",
         verify_attn_backend="auto",
     )
-    eagle_layers = cfg.resolve_eagle_layers(n_layers)  # 默认 [2, L//2, L-3]
+    # * 默认 [2, L//2, L-3] -> [2, 16, 29]
+    eagle_layers = cfg.resolve_eagle_layers(n_layers)
     print(
         f"[eagle3-e2e] eagle_layers={eagle_layers} draft_vocab_size={draft_vocab_size}",
         flush=True,
@@ -133,7 +135,9 @@ def main() -> None:
             device
         )
     else:
-        input_ids = tok(command_line_args.prompt, return_tensors="pt")["input_ids"].to(device)
+        input_ids = tok(command_line_args.prompt, return_tensors="pt")["input_ids"].to(
+            device
+        )
     plen = int(input_ids.shape[1])
     eos = tok.eos_token_id
 
