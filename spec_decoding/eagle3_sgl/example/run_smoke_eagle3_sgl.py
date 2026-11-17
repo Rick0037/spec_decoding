@@ -29,7 +29,6 @@ def main() -> None:
     p.add_argument("--max-new-tokens", type=int, default=6)
     p.add_argument("--topk", type=int, default=2)
     p.add_argument("--num-steps", type=int, default=2)
-    p.add_argument("--num-layers", type=int, default=1)
     p.add_argument("--device", default="cpu")
     args = p.parse_args()
 
@@ -56,7 +55,7 @@ def main() -> None:
 
     # 轻量 EAGLE3 draft(多层 act 条件),复用 target embedding/lm_head
     draft = build_eagle3_sgl_draft(
-        target, layers, num_layers=args.num_layers, device=device
+        target, layers, device=device
     )
     draft_topk_fn = make_eagle3_sgl_draft_topk_fn(draft, topk=args.topk)
 

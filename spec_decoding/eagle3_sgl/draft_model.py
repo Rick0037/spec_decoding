@@ -271,48 +271,6 @@ class _Eagle3MidLayer(nn.Module):
         return residual + mlp, new_kv
 
 
-class _PlainLayer(nn.Module):
-    """标准单输入 pre-norm 层(仅 num_layers>1 时,midlayer 之后再叠的层)."""
-
-    def __init__(
-        self,
-        hidden: int,
-        n_heads: int,
-        intermediate: int,
-        n_kv_heads: int = None,
-        eps: float = 1e-6,
-        **fk,
-    ) -> None:
-        super().__init__()
-        self.n_heads = n_heads
-        self.n_kv_heads = n_kv_heads if n_kv_heads is not None else n_heads
-        self.head_dim = hidden // n_heads
-        kv_dim = self.n_kv_heads * self.head_dim
-        self.input_layernorm = _RMSNorm(hidden, eps=eps, **fk)
-        self.post_attention_layernorm = _RMSNorm(hidden, eps=eps, **fk)
-        self.q_proj = nn.Linear(hidden, hidden, bias=False, **fk)
-        self.k_proj = nn.Linear(hidden, kv_dim, bias=False, **fk)
-        self.v_proj = nn.Linear(hidden, kv_dim, bias=False, **fk)
-        self.o_proj = nn.Linear(hidden, hidden, bias=False, **fk)
-        self.gate_proj = nn.Linear(hidden, intermediate, bias=False, **fk)
-        self.up_proj = nn.Linear(hidden, intermediate, bias=False, **fk)
-        self.down_proj = nn.Linear(intermediate, hidden, bias=False, **fk)
-
-    def _attn(self, x: torch.Tensor) -> torch.Tensor:
-        b, s, h = x.shape
-        q = self.q_proj(x).view(b, s, self.n_heads, self.head_dim).transpose(1, 2)
-        k = self.k_proj(x).view(b, s, self.n_kv_heads, self.head_dim).transpose(1, 2)
-        v = self.v_proj(x).view(b, s, self.n_kv_heads, self.head_dim).transpose(1, 2)
-        o = _sdpa_gqa(q, k, v, self.n_heads, self.n_kv_heads)
-        return self.o_proj(o.transpose(1, 2).contiguous().view(b, s, h))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # 标准 Llama block:pre-norm attn + pre-norm SwiGLU
-        x = x + self._attn(self.input_layernorm(x))
-        h = self.post_attention_layernorm(x)
-        return x + self.down_proj(F.silu(self.gate_proj(h)) * self.up_proj(h))
-
-
 class Eagle3SglDraftModel(nn.Module):
     """
     EAGLE3 draft(官方 EAGLE3 midlayer 结构):
@@ -326,7 +284,6 @@ class Eagle3SglDraftModel(nn.Module):
         target: Union[PreTrainedModel, nn.Module],
         eagle_layers: Sequence[int],
         *,
-        num_layers: int = 1,
         draft_vocab_size: Optional[int] = None,
         d2t: Optional[torch.Tensor] = None,
         device: Optional[torch.device] = None,
@@ -340,8 +297,6 @@ class Eagle3SglDraftModel(nn.Module):
             HF CausalLM;复用其 embedding(及可选 lm_head)。
         eagle_layers
             eagle3 act目标layer下标;n_acts = len(eagle_layers),决定 fc 输入维 n*H。
-        num_layers
-            decoder 层数;1 时仅 midlayer;>1 时 midlayer 后叠 _PlainLayer。
         draft_vocab_size
             独立 draft 词表大小;给定则建 lm_head(H, draft_vocab_size) + hot_token_id。
         d2t
@@ -355,6 +310,7 @@ class Eagle3SglDraftModel(nn.Module):
         hidden = int(cfg.hidden_size)
         n_heads = int(getattr(cfg, "num_attention_heads", max(1, hidden // 64)))
         n_kv_heads = int(getattr(cfg, "num_key_value_heads", n_heads))
+        # * mlp middle dim
         intermediate = int(getattr(cfg, "intermediate_size", 4 * hidden))
         rope_base = float(getattr(cfg, "rope_theta", 10000.0))
         eps = float(getattr(cfg, "rms_norm_eps", 1e-6))
@@ -383,14 +339,6 @@ class Eagle3SglDraftModel(nn.Module):
             rope_base=rope_base,
             eps=eps,
             **fk,
-        )
-        self.extra_layers = nn.ModuleList(
-            [
-                _PlainLayer(
-                    hidden, n_heads, intermediate, n_kv_heads=n_kv_heads, eps=eps, **fk
-                )
-                for _ in range(max(0, num_layers - 1))
-            ]
         )
         self.norm = _RMSNorm(hidden, eps=eps, **fk)
 
@@ -453,8 +401,6 @@ class Eagle3SglDraftModel(nn.Module):
         reduced = self.fc(target_acts.to(embeds.dtype))  # n*H → H
         # embed/hidden 分别 norm 后拼 2H
         h = self.midlayer(embeds, reduced)
-        for layer in self.extra_layers:
-            h = layer(h)
         h = self.norm(h)
         return self._lm_logits(h[:, -1, :])
 
@@ -484,10 +430,6 @@ class Eagle3SglDraftModel(nn.Module):
         logits, hidden, new_kv
             末步 logits [B, V]、更新后的 cond hidden [B, H]、extend 后的 KV。
         """
-        if self.extra_layers:
-            raise NotImplementedError(
-                "autoregressive step supports num_layers=1 (midlayer only)"
-            )
         embeds = self.embed(token_id)
         if cond.dim() == 2:
             cond = cond.unsqueeze(1)
@@ -524,10 +466,6 @@ class Eagle3SglDraftModel(nn.Module):
         EAGLE shift:draft 消费 prefix_ids[:,1:] 与 acts_all[:,:-1],
         即位置 t 的 draft 输入 act 来自 target 在 t-1 处的多层特征。
         """
-        if self.extra_layers:
-            raise NotImplementedError(
-                "autoregressive prefill supports num_layers=1 (midlayer only)"
-            )
         ids = prefix_ids[:, 1:]  # EAGLE shift:draft 不消费 prompt 首 token
         # 位置 t 的 draft 条件 = target 在 t-1 的多层 act
         acts = target_acts_all[:, :-1, :]
@@ -570,10 +508,6 @@ class Eagle3SglDraftModel(nn.Module):
         root_logits, root_hidden, kv
             extend 末步 logits/hidden 与更新后的 KV(供下一轮 expand_draft_tree_ar)。
         """
-        if self.extra_layers:
-            raise NotImplementedError(
-                "autoregressive extend supports num_layers=1 (midlayer only)"
-            )
         A = int(token_ids.shape[1])
         if A == 0:
             raise ValueError("extend_tokens requires at least one token")
@@ -615,7 +549,7 @@ def build_eagle3_sgl_draft(
     target: Union[PreTrainedModel, nn.Module],
     eagle_layers: Sequence[int],
     *,
-    num_layers: int = 1,
+    # `*` 后面的参数必须写参数名传递
     draft_vocab_size: Optional[int] = None,
     d2t: Optional[torch.Tensor] = None,
     draft_weights_path: Optional[str] = None,
@@ -636,18 +570,17 @@ def build_eagle3_sgl_draft(
       topk 后用 d2t 映射回 target id。加载真实 ckpt 时,draft_vocab_size 应与 ckpt 的
       draft 词表大小一致(= len(d2t))。
     """
-    m = Eagle3SglDraftModel(
+    draft_model = Eagle3SglDraftModel(
         target,
         eagle_layers,
-        num_layers=num_layers,
         draft_vocab_size=draft_vocab_size,
         d2t=d2t,
         device=device,
         dtype=dtype,
     )
     if draft_weights_path is not None:
-        load_eagle3_draft_weights(m, draft_weights_path)
-    return m
+        load_eagle3_draft_weights(draft_model, draft_weights_path)
+    return draft_model
 
 
 def _read_state_dict(path: str) -> dict:

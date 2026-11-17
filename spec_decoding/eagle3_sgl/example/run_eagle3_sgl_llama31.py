@@ -107,7 +107,6 @@ def main() -> None:
     draft = build_eagle3_sgl_draft(
         target,
         eagle_layers,
-        num_layers=1,
         draft_vocab_size=draft_vocab_size,
         draft_weights_path=draft_bin,  # 加载真实 EAGLE3 权重
         device=device,

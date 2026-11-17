@@ -120,7 +120,6 @@ def main():
     draft = build_eagle3_sgl_draft(
         target,
         eagle_layers,
-        num_layers=1,
         draft_vocab_size=int(draft_cfg.get("draft_vocab_size", 32000)),
         draft_weights_path=draft_bin,
         device=device,

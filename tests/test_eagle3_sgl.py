@@ -58,7 +58,7 @@ class TestEagle3Sgl(unittest.TestCase):
         )
 
         layers = [0, 1] if self.n_layers <= 2 else list(range(min(3, self.n_layers)))
-        draft = build_eagle3_sgl_draft(self.target, layers, num_layers=1)
+        draft = build_eagle3_sgl_draft(self.target, layers)
         H = int(self.target.config.hidden_size)
         # (1) 多层 aux:fc 输入 = n*H(降维多层 act,与 embedding 分开)
         self.assertEqual(draft.fc.in_features, len(layers) * H)
@@ -172,7 +172,7 @@ class TestEagle3Sgl(unittest.TestCase):
             verify_mode="full_model_tree",
         )
         layers = cfg.resolve_eagle_layers(self.n_layers)
-        draft = build_eagle3_sgl_draft(self.target, layers, num_layers=1)
+        draft = build_eagle3_sgl_draft(self.target, layers)
         gen = Eagle3SglGenerator(
             self.target,
             cfg,
