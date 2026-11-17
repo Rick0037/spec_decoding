@@ -67,12 +67,12 @@ def _crop_cache_back_to(past_key_values: Any, target_len: int) -> None:
         past_key_values.crop(target_len)
 
 
-def _forward_and_extend_dynamic_kv_then_crop(
+def _forward_target_tree_and_restore_cache(
     target_m, tree_tokens, past_key_values, *, position_ids, attention_mask
 ):
-    """在 runner 的 past 上临时 extend(追加 L 个树节点 KV)跑一次 forward,取完 logits 后 crop 还原。
-
-    比深拷贝整份 cache 便宜得多(只多存/截掉 L 个位置的 KV);KV-replay 用全长 mask 后 past 不被污染。
+    """
+    使用forward 进行验证, 并使用past key value进行加速, 加速之后又截取回去, 因为在验证阶段,
+    实际不应该加入到cache中
     """
     before = int(past_key_values.get_seq_length())
     # * 实际推理
@@ -96,7 +96,7 @@ def _select_append_root_child(
     parent: List[int],
     token_ids: List[int],
     leaves: List[int],
-) -> Tuple[List[int], int, int, List[int]]:
+) -> List[int]:
     """在所有根→叶路径中选接受最长的一条,返回本轮要 append 的 token."""
     best_accepted_len, best_next_token, best_leaf = -1, 0, 0
     for leaf in leaves:
@@ -113,7 +113,7 @@ def _select_append_root_child(
     best_path_nodes = path_node_indices_root_to_leaf(parent, best_leaf)
     best_path_tokens = [token_ids[i] for i in best_path_nodes]
     append_list = best_path_tokens[:best_accepted_len] + [best_next_token]
-    return append_list, best_accepted_len, int(best_leaf), best_path_tokens
+    return append_list
 
 
 def _match_one_leaf_path(
@@ -132,7 +132,7 @@ def _match_one_leaf_path(
     """
     path_nodes = path_node_indices_root_to_leaf(parent, leaf)
     for pos, node_idx in enumerate(path_nodes):
-        # 预测源:根节点用 root_logits,其余用父节点的输出 logits
+        #! 预测源:根节点用 root_logits,其余用父节点的输出 logits
         source_logits = (
             root_logits if pos == 0 else all_node_logits[path_nodes[pos - 1]]
         )
@@ -152,7 +152,7 @@ def full_tree_verify_extend(
     *,
     leaves: List[int],
     device: torch.device,
-) -> Tuple[List[int], int, int, List[int]]:
+) -> List[int]:
     """复用前缀 KV 的 extend 树掩码 verify(HF sdpa + 4D 树 cross mask):只前向 L 个树节点。
 
     在 cache 副本上跑(不污染 runner 的 past);root 接受用 recovery_logits。无损(与贪心一致)。
@@ -164,7 +164,7 @@ def full_tree_verify_extend(
         layout, past_len, device=device, dtype=dtype
     ).view(1, 1, L, past_len + L)
     pos = layout_tree_position_ids(layout, past_len).unsqueeze(0).to(device)
-    node_logits = _forward_and_extend_dynamic_kv_then_crop(
+    node_logits = _forward_target_tree_and_restore_cache(
         target_m, tree_tokens, past_key_values, position_ids=pos, attention_mask=cross
     )  # [L, V]
     return _select_append_root_child(
@@ -182,7 +182,7 @@ def full_tree_verify_triton(
     *,
     leaves: List[int],
     device: torch.device,
-) -> Tuple[List[int], int, int, List[int]]:
+) -> List[int]:
     """extend verify 的 triton 版:
     复用前缀 KV,用 SGLang extend_attention_fwd + 树 custom_mask。
     数值与 full_tree_verify_extend 等价;
@@ -191,7 +191,7 @@ def full_tree_verify_triton(
     L = len(layout)  # draft_lens
     # (Pdb) layout
     # TreeVerifyLayout(token_ids=[23557, 18160, 18160, 23557, 23557, 18160],
-    # parent=[-1, -1, 0, 0, 1, 1], dfs_order=[0, 1, 2, 3, 4, 5])
+    # parent=[-1, -1, 0, 0, 1, 1])
     # import pdb
 
     # pdb.set_trace()
@@ -207,7 +207,7 @@ def full_tree_verify_triton(
     # ! with tree_verify_triton_attention_context 实际上就是使用 trition kernel 去替换linear中的
     # * 每次都需要重新建树, 重新替换attention之后验证, 然后 再替换回去
     with tree_verify_triton_attention_context(decoder, meta):
-        all_node_logits = _forward_and_extend_dynamic_kv_then_crop(
+        all_node_logits = _forward_target_tree_and_restore_cache(
             target_m,
             tree_tokens,
             past_key_values,  # * 从runner 中就一直是引用传递

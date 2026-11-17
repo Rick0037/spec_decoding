@@ -10,10 +10,8 @@ self-attention,不能用标准下三角 mask:那样会允许 兄弟子树 互相
 EAGLE 的做法:位置 i 的 Q 只能 attend 树意义上从根到 i 路径上的 key
 (含 i 自身);KV cache 里的历史前缀照常全局可见。
 
-- 仅 树上 L 个新节点 互看时,用 build_tree_sdpa_attn_bias([L,L])。
-- L 个 draft query 对前缀 + L整段 K 的并行 SDPA,用
-  build_tree_cross_attn_bias_with_prefix([L, past+L]),见
-  tree_verify_parallel。
+L 个 draft query 对前缀 + L 整段 K 的并行 SDPA,用
+build_tree_cross_attn_bias_with_prefix([L, past+L])。
 
 这里输出 SDPA additive bias(禁止处为 -inf),与
 torch.nn.functional.scaled_dot_product_attention(..., attn_mask=...) 对接。
@@ -30,7 +28,7 @@ import torch
 # -----------------------------------------------------------------------------
 # 摊平后节点 i 的语义:draft 树里的第 i 个待 verify 位置,parent[i] 指向
 # 父节点下标(-1 为根).token_ids[i] 为该位置上的 draft token.与一次 verify
-# forward 里新 token 段的第 i 列对齐后即可套 build_tree_sdpa_attn_bias.
+# forward 里新 token 段的第 i 列对齐后即可套树掩码.
 # -----------------------------------------------------------------------------
 @dataclass
 class TreeVerifyLayout:
@@ -45,15 +43,12 @@ class TreeVerifyLayout:
     信息:verify 时节点 i 只允许 attend 自己的祖先链(+前缀),不允许看到兄弟
     分支。至于节点在数组里按什么顺序排(BFS/DFS),掩码逻辑并不关心。
 
-    dfs_order:预留字段,给外部做 DFS 重排时记录映射;当前恒为 range(L)。
     """
 
     token_ids: List[int]
     """摊平后第 i 个 verify 位置上的 draft token id(与 parent[i] 同属节点 i)。"""
     parent: List[int]
     """parent[i] 为节点 i 的父节点下标;-1 表示根(整段序列中第一个节点)。"""
-    dfs_order: List[int]
-    """通常为 range(L);预留与外部重排对齐。"""
 
     def __len__(self) -> int:
         return len(self.token_ids)
@@ -109,54 +104,6 @@ def _on_tree_path(parent: Sequence[int], anc: int, desc: int) -> bool:
     return False
 
 
-# -----------------------------------------------------------------------------
-# 完整verify的核心张量:bias[i,j]=0 当且仅当 j 在
-# i 的祖先链上;否则为 -inf.拼到 past_len+L 的大 mask 时注意只覆盖新 L 列对
-# 新 L 行子块(对 past 的列通常全 0 允许 attend).
-# -----------------------------------------------------------------------------
-def build_tree_sdpa_attn_bias(
-    layout: TreeVerifyLayout,
-    *,
-    device: torch.device,
-    dtype: torch.dtype = torch.float32,
-) -> torch.Tensor:
-    """
-    构造 [L, L] 的 additive bias,满足 树因果:
-
-    - bias[i, j] == 0:节点 i 允许 attend 节点 j;
-    - bias[i, j] == -inf:禁止。
-
-    与 torch.nn.functional.scaled_dot_product_attention(is_causal=False, attn_mask=...)
-    配合:传入 attn_mask 形状 [B, H, L, L] 时需 broadcast。
-    """
-    n = len(layout)
-    if n == 0:
-        return torch.zeros(0, 0, device=device, dtype=dtype)
-
-    neg = torch.finfo(dtype).min
-    bias = torch.full((n, n), neg, device=device, dtype=dtype)
-    for i in range(n):
-        for j in range(n):
-            if _on_tree_path(layout.parent, j, i):
-                bias[i, j] = 0.0
-    return bias
-
-
-def build_tree_sdpa_attn_bias_4d(
-    layout: TreeVerifyLayout,
-    *,
-    batch: int = 1,
-    num_heads: int = 1,
-    device: torch.device,
-    dtype: torch.dtype = torch.float32,
-) -> torch.Tensor:
-    """[B, H, L, L] 广播用 4D bias."""
-    b2 = build_tree_sdpa_attn_bias(layout, device=device, dtype=dtype)
-    return b2.view(1, 1, len(layout), len(layout)).expand(
-        batch, num_heads, len(layout), len(layout)
-    )
-
-
 # 用于tree attention verify,attention_bias即表示attention_mask
 def build_tree_cross_attn_bias_with_prefix(
     layout: TreeVerifyLayout,
@@ -172,8 +119,7 @@ def build_tree_cross_attn_bias_with_prefix(
     第 i 个 draft query(0 <= i < L)允许 attend 的 key 下标 j:
 
     - j < past_seq_len:前缀任意位置(整段 prompt 可见);
-    - j >= past_seq_len:令 k = j - past_seq_len,仅当 k 在树上是 i
-      的祖先或 k==i 时允许(与 build_tree_sdpa_attn_bias 的 [L,L] 子块一致)。
+    - j >= past_seq_len:令 k = j - past_seq_len,仅当 k 是 i 的祖先或 k==i 时允许。
 
     返回 [L, past_seq_len + L],可直接广播到
     scaled_dot_product_attention 的 attn_mask(additive,禁止处为 -inf)。
@@ -199,20 +145,3 @@ def build_tree_cross_attn_bias_with_prefix(
                 if _on_tree_path(layout.parent, k, i):
                     bias[i, j] = 0.0
     return bias
-
-
-def build_tree_cross_attn_bias_with_prefix_4d(
-    layout: TreeVerifyLayout,
-    past_seq_len: int,
-    *,
-    batch: int = 1,
-    num_heads: int = 1,
-    device: torch.device,
-    dtype: torch.dtype = torch.float32,
-) -> torch.Tensor:
-    """[B, H, L, past_seq_len+L] 广播用."""
-    b2 = build_tree_cross_attn_bias_with_prefix(
-        layout, past_seq_len, device=device, dtype=dtype
-    )
-    L, t = b2.shape
-    return b2.view(1, 1, L, t).expand(batch, num_heads, L, t)

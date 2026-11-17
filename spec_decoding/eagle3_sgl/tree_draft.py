@@ -30,8 +30,6 @@ class TreeDraftResult:
     token_ids: List[int]
     parent: List[int]
     node_depth: List[int]
-    bfs_index: List[int]
-    """节点创建顺序(调试用)。"""
     cum_log_probs: List[float] = field(default_factory=list)
     """* [继承自 EAGLE2] 每个节点的累计 log 概率(cumulative 模式用;static 模式留空)。"""
 
@@ -124,7 +122,6 @@ def expand_draft_tree(
     token_ids: List[int] = []
     parent: List[int] = []
     depth: List[int] = []
-    bfs_ix: List[int] = []
     # root_parent_token_id = is,对其作topk spec
     # root_toks = [Paris, the]
     # 根层:对前缀末 token做一次 draft_topk_fn(decoding阶段),得到 K 个候选子节点
@@ -136,7 +133,6 @@ def expand_draft_tree(
     # token_ids = [Paris, the, ., ,, capital, city, .., .., .., .., .., .., .., ..]
     # parent    = [ -1,  -1,  0, 0,   1,    1,   2,  2,  3,  3,  4,  4,  5,  5 ]
     # node_depth= [  1,   1,  2, 2,   2,    2,   3,  3,  3,  3,  3,  3,  3,  3 ]
-    # bfs_index = [  0,   1,  2, 3,   4,    5,   6,  7,  8,  9, 10, 11, 12, 13 ]
     # 把paris和the这俩由prompt末端token生成的topK添加到队列
     # q=((0,1,root hidden,[Paris]),(1,1,root hidden,[the]))
     # parent=(-1,-1)
@@ -148,7 +144,6 @@ def expand_draft_tree(
         token_ids.append(t)
         parent.append(-1)
         depth.append(1)
-        bfs_ix.append(idx)
         q.append((idx, 1, root_hidden, [t]))
 
     # 逐层 BFS:弹出父节点 → 可选刷新 target act → 对父末 token 再 topk → 入队子节点
@@ -173,17 +168,14 @@ def expand_draft_tree(
             token_ids.append(ct)
             parent.append(pidx)
             depth.append(d + 1)
-            bfs_ix.append(cidx)
             q.append((cidx, d + 1, h, path_p + [ct]))
     # token_ids = [Paris, the, ., ,, capital, city, .., .., .., .., .., .., .., ..]
     # parent    = [ -1,  -1,  0, 0,   1,    1,   2,  2,  3,  3,  4,  4,  5,  5 ]
     # node_depth= [  1,   1,  2, 2,   2,    2,   3,  3,  3,  3,  3,  3,  3,  3 ]
-    # bfs_index = [  0,   1,  2, 3,   4,    5,   6,  7,  8,  9, 10, 11, 12, 13 ]
     return TreeDraftResult(
         token_ids=token_ids,  # bfs式地保存了树里所有token id
         parent=parent,  # bfs式地保存了树里所有token的parent id
         node_depth=depth,
-        bfs_index=bfs_ix,  # bfs式地保存了树里所有token的创建顺序
     )
 
 
@@ -286,7 +278,6 @@ def expand_draft_tree_topk(
     parent: List[int] = []
     node_depth: List[int] = []
     cum_log_probs: List[float] = []
-    bfs_ix: List[int] = []
 
     topk_ids, topk_scores = draft_topk_fn(root_hidden, root_parent_token_id)
     root_toks, root_lps = _topk_log_probs(topk_ids, topk_scores, K)
@@ -299,7 +290,6 @@ def expand_draft_tree_topk(
         parent.append(-1)
         node_depth.append(1)
         cum_log_probs.append(lp)
-        bfs_ix.append(idx)
         path = [t]
         h = _expand_hidden(
             root_hidden,
@@ -335,7 +325,6 @@ def expand_draft_tree_topk(
                 parent.append(node.tree_idx)
                 node_depth.append(node_depth[node.tree_idx] + 1)
                 cum_log_probs.append(new_lp)
-                bfs_ix.append(idx)
                 candidates.append(_FrontierNode(idx, new_lp, h, path_c))
 
         candidates.sort(key=lambda n: n.cum_logp, reverse=True)
@@ -345,13 +334,11 @@ def expand_draft_tree_topk(
     token_ids, parent, node_depth, cum_log_probs = _compact_tree_by_score(
         token_ids, parent, node_depth, cum_log_probs, cfg.max_tree_nodes
     )
-    bfs_ix = list(range(len(token_ids)))
 
     return TreeDraftResult(
         token_ids=token_ids,
         parent=parent,
         node_depth=node_depth,
-        bfs_index=bfs_ix,
         cum_log_probs=cum_log_probs,
     )
 
@@ -395,7 +382,6 @@ def expand_draft_tree_ar(
     token_ids: List[int] = []
     parent: List[int] = []
     depth: List[int] = []
-    bfs_ix: List[int] = []
 
     h_root, kv_root = root_hidden, root_kv
     # 根层候选来自 prefill 末步 logits 的 top-K(可能经 d2t 映到 target id)
@@ -410,7 +396,6 @@ def expand_draft_tree_ar(
         token_ids.append(t)
         parent.append(-1)
         depth.append(1)
-        bfs_ix.append(idx)
         q.append((idx, 1, t, h_root, kv_root))
 
     # BFS:每个分支用自己的 (cond, kv) fork;同一父的多个子各拷贝一份状态
@@ -429,29 +414,18 @@ def expand_draft_tree_ar(
             token_ids.append(ct)
             parent.append(pidx)
             depth.append(d + 1)
-            bfs_ix.append(cidx)
             q.append((cidx, d + 1, ct, h, kv))  # 子分支带走 step 后的 (cond, kv)
 
-    return TreeDraftResult(
-        token_ids=token_ids, parent=parent, node_depth=depth, bfs_index=bfs_ix
-    )
+    return TreeDraftResult(token_ids=token_ids, parent=parent, node_depth=depth)
 
 
 def tree_draft_to_verify_layout(
     draft: TreeDraftResult,
 ) -> "TreeVerifyLayout":
-    """TreeDraftResult → TreeVerifyLayout(verify / 掩码构造用)。
-
-    Parameters
-    ----------
-    draft
-        expand_draft_tree* 的输出;dfs_order 默认 range(L) 与 BFS 下标一致。
-    """
+    """TreeDraftResult → TreeVerifyLayout(verify / 掩码构造用)。"""
     from .tree_verify_mask import TreeVerifyLayout
 
-    n = len(draft.token_ids)
     return TreeVerifyLayout(
         token_ids=list(draft.token_ids),
         parent=list(draft.parent),
-        dfs_order=list(range(n)),
     )

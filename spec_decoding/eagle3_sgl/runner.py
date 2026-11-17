@@ -39,11 +39,6 @@ from .tree_draft import (
     expand_draft_tree_topk,
     tree_draft_to_verify_layout,
 )
-from .tree_verify_mask import (
-    TreeVerifyLayout,
-    build_tree_cross_attn_bias_with_prefix,
-    build_tree_sdpa_attn_bias,
-)
 from .tree_verify_attn import triton_extend_available
 from .tree_verify_full import (
     full_tree_verify_extend,
@@ -348,11 +343,8 @@ class Eagle3SglGenerator:
         root_acts: Optional[torch.Tensor] = None,
         acts_all: Optional[torch.Tensor] = None,
         draft_state: Optional[_DraftKvState] = None,
-    ) -> Tuple[
-        Optional[torch.LongTensor], TreeVerifyLayout, torch.Tensor, TreeDraftResult
-    ]:
-        """
-        单轮投机返回 (append_chunk, layout, attn_bias_2d, draft_result)。
+    ) -> torch.LongTensor:
+        """单轮投机，返回本轮采纳的 token [1, A]。
 
         Parameters
         ----------
@@ -370,18 +362,6 @@ class Eagle3SglGenerator:
             全前缀各位置 act [1, P, n*H];AR draft prefill fallback。
         draft_state
             增量维护的 draft KV + root 输出;AR 路径避免每轮 prefill 整段 prefix。
-
-        Returns
-        -------
-        append_chunk
-            本轮采纳 token [1, A](含 path + bonus 或 corr)。
-        layout
-            TreeVerifyLayout,供 verify / 调试。
-        attn_bias_2d
-            reference_paths → [L,L] 树内掩码;
-            full_model_tree → [L, past+L] cross 掩码。
-        draft_result
-            原始 TreeDraftResult。
         """
         device = full_prefix_ids.device
         # ① 建树(AR 或 topk_fn)
@@ -395,13 +375,7 @@ class Eagle3SglGenerator:
         # 退化:树只有空或无叶节点时,等价于投机解码失败,直接 target生成下一 token
         if not leaves:
             _, nxt = _verify_path_clean(self.target_m, full_prefix_ids, [], device)
-            bias = build_tree_sdpa_attn_bias(layout, device=device, dtype=torch.float32)
-            return (
-                torch.tensor([[nxt]], device=device, dtype=torch.long),
-                layout,
-                bias,
-                draft_res,
-            )
+            return torch.tensor([[nxt]], device=device, dtype=torch.long)
         if self.cfg.verify_mode == "full_model_tree":
             if recovery_logits is None:
                 raise ValueError("full_model_tree verify requires recovery_logits")
@@ -420,7 +394,7 @@ class Eagle3SglGenerator:
             verify_fn = (
                 full_tree_verify_triton if use_triton else full_tree_verify_extend
             )
-            append_list, _, _, _ = verify_fn(
+            append_list = verify_fn(
                 self.target_m,
                 layout,
                 past_before,
@@ -430,16 +404,12 @@ class Eagle3SglGenerator:
                 device=device,
             )
             append = torch.tensor([append_list], device=device, dtype=torch.long)
-            cross_bias = build_tree_cross_attn_bias_with_prefix(
-                layout, past_len, device=device, dtype=torch.float32
-            )
-            return append, layout, cross_bias, draft_res
+            return append
 
         if self.cfg.verify_mode != "reference_paths":
             raise ValueError(f"unhandled verify_mode={self.cfg.verify_mode!r}")
 
         # reference_paths:每条叶路径一次完整 causal forward(串行verify),选 match 最长的叶(慢,易对照)
-        bias = build_tree_sdpa_attn_bias(layout, device=device, dtype=torch.float32)
         best_m = -1
         best_li = 10**9
         best_next = 0
@@ -461,7 +431,7 @@ class Eagle3SglGenerator:
             append_list = path[:best_m] + [best_next]
 
         append = torch.tensor([append_list], device=device, dtype=torch.long)
-        return append, layout, bias, draft_res
+        return append
 
     # ------------------------------------------------------------------
     # 多轮自回归:每轮 = generate_step_payload + 用 target 重放 append 以对齐 KV.
@@ -529,7 +499,9 @@ class Eagle3SglGenerator:
                 break  # 已到 EOS,停止
             last_t = out_ids[:, -1:]
             # ④ 单轮:建树 → verify → append
-            append, _, _, _ = self.generate_step_payload(
+            # * spec_decoding/eagle3_sgl/tree_verify_full.py 中 _match_one_leaf_path
+            # * 跟节点使用 recovery_logits 来进行验证, 非跟节点使用forward出来的logits进行验证
+            append = self.generate_step_payload(
                 out_ids, past, last_t, recovery_logits, root_acts, acts_all, draft_state
             )
             # 把 append 重放进 target KV.带 past 时 attention_mask 必须覆盖 [past + append] 全长,

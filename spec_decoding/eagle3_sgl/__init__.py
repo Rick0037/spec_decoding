@@ -31,7 +31,6 @@ from .tree_draft import (
 from .tree_verify_mask import (
     TreeVerifyLayout,
     build_tree_cross_attn_bias_with_prefix,
-    build_tree_sdpa_attn_bias,
 )
 
 __all__ = [
@@ -44,7 +43,6 @@ __all__ = [
     "TreeDraftResult",
     "TreeVerifyLayout",
     "build_tree_cross_attn_bias_with_prefix",
-    "build_tree_sdpa_attn_bias",
     "expand_draft_tree",
     "expand_draft_tree_topk",
     "expand_draft_tree_ar",
