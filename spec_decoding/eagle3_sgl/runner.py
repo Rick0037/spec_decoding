@@ -158,11 +158,13 @@ class _DraftKvState:
     kv: Any
     """draft 注意力层的 (key, value) 缓存；序列长度为 prefix_len - 1。"""
     prefix_len: int
-    """当前已接受序列长度，与 out_ids.shape[1] 一致。"""
+    """draft 已消费的 target 位置数. 首轮预消费时比 out_ids 长度大 1, 否则一致."""
     root_logits: torch.Tensor
     """末位置的 draft logits [1, draft_vocab_size]，用于选择根层候选。"""
     root_hidden: torch.Tensor
     """末位置的 draft hidden [1, hidden_size]，作为各分支递归展开的初始条件。"""
+    confirmed_root_token: Optional[int] = None
+    """首轮 target 已确定且 draft 已消费的根 token, 其他轮为 None."""
 
 
 # -----------------------------------------------------------------------------
@@ -199,22 +201,34 @@ class Eagle3SglGenerator:
         prefix_ids: torch.LongTensor,
         draft_state: _DraftKvState,
     ) -> TreeLayout:
-        """用 AR draft 的 KV 和递归 hidden 构造 top-k 树。"""
-        if draft_state.prefix_len != int(prefix_ids.shape[1]):
+        """用 AR draft 的 KV 和递归 hidden 构造 top-k 树."""
+        prefix_length = int(prefix_ids.shape[1])
+        expected_draft_prefix_length = prefix_length
+        if draft_state.confirmed_root_token is not None:
+            expected_draft_prefix_length += 1
+        if draft_state.prefix_len != expected_draft_prefix_length:
             raise ValueError(
                 f"draft_state.prefix_len {draft_state.prefix_len} != "
-                f"prefix len {prefix_ids.shape[1]}"
+                f"expected draft prefix len {expected_draft_prefix_length}"
             )
         # * target 的 21 个 token, 对应 draft 的`21-1=20` 条 KV.
         # * 所以传进来的`draft_kv_length=20` 实际表示 draft 已有 KV 数量.
-        return expand_draft_tree_ar(
+        # 首轮预消费 target 根 token 后, draft_kv_length 会额外增加 1.
+        draft_layout = expand_draft_tree_ar(
             self.cfg,
             self.draft_model,
             draft_state.root_logits,
             draft_state.root_hidden,
             draft_state.kv,
-            draft_kv_length=int(prefix_ids.shape[1]) - 1,
+            draft_kv_length=draft_state.prefix_len - 1,
             device=prefix_ids.device,
+        )
+        if draft_state.confirmed_root_token is None:
+            return draft_layout
+        # 把已确定的 target 根 token 放在最前面, draft 候选全部作为它的后代.
+        return TreeLayout(
+            token_ids=[draft_state.confirmed_root_token] + draft_layout.token_ids,
+            parent=[-1] + [index + 1 for index in draft_layout.parent],
         )
 
     # ------------------------------------------------------------------
@@ -329,12 +343,25 @@ class Eagle3SglGenerator:
         draft_logits, draft_hidden, draft_kv = self.draft_model.prefill(
             input_ids, acts_all
         )
+        # target 已确定首个新 token, 用真实末位特征让 draft 提前消费它.
+        first_target_token = int(recovery_logits.argmax(dim=-1).item())
+        first_target_token_ids = torch.tensor(
+            [[first_target_token]], device=input_ids.device, dtype=torch.long
+        )
+        last_target_features = acts_all[:, -1:, :]
+        draft_logits, draft_hidden, draft_kv = self.draft_model.extend_tokens(
+            first_target_token_ids,
+            last_target_features,
+            draft_kv,
+            int(input_ids.shape[1]) - 1,
+        )
         # * prefill得初始状态
         draft_state = _DraftKvState(
             kv=draft_kv,
-            prefix_len=int(input_ids.shape[1]),
+            prefix_len=int(input_ids.shape[1]) + 1,
             root_logits=draft_logits,
             root_hidden=draft_hidden,
+            confirmed_root_token=first_target_token,
         )
         return past, recovery_logits, acts_all, draft_state
 
@@ -384,9 +411,22 @@ class Eagle3SglGenerator:
         draft_state: _DraftKvState,
     ) -> _DraftKvState:
         """用接受 token 和 target 特征更新 draft 状态."""
+        tokens_to_extend = append
+        if draft_state.confirmed_root_token is not None:
+            # 首轮根 token 已在 prefill 时写入 draft KV, 这里不能重复写入.
+            if int(append[0, 0].item()) != draft_state.confirmed_root_token:
+                raise ValueError("first append token != confirmed draft root token")
+            tokens_to_extend = append[:, 1:]
         # token t 使用 t-1 位置的特征，所以切片两端都减 1
         old_prefix_length = draft_state.prefix_len
-        new_prefix_length = old_prefix_length + int(append.shape[1])
+        new_prefix_length = old_prefix_length + int(tokens_to_extend.shape[1])
+        if int(tokens_to_extend.shape[1]) == 0:
+            return _DraftKvState(
+                kv=draft_state.kv,
+                prefix_len=new_prefix_length,
+                root_logits=draft_state.root_logits,
+                root_hidden=draft_state.root_hidden,
+            )
         #! new_prefix_length - 1 的切片不包括 new_prefix_length - 1, 直到 new_prefix_length - 2 就停止了, 这里搞了一波错位
         #! append token 下标：21、22、23
         #! 对应 feature 下标:20、21、22
@@ -399,7 +439,7 @@ class Eagle3SglGenerator:
         所以这里选择对接受 token 重新计算.
         """
         draft_logits, draft_hidden, draft_kv = self.draft_model.extend_tokens(
-            append,
+            tokens_to_extend,
             draft_input_features,
             draft_state.kv,
             old_prefix_length - 1,
