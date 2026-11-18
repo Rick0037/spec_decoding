@@ -1,80 +1,104 @@
-# EAGLE3 根节点待优化方案
+# EAGLE3 draft prefill 待优化方案
 
-## 背景
+## 目标
 
-当前 `generate_step_payload()` 的顺序是:
+不改变 draft 建树和 target verify 的整体架构.
 
-```text
-draft 建完整 top-k 树
--> target verify
--> 用 recovery_logits 检查根节点
--> 根节点不匹配时丢弃整棵树
-```
+只利用 target prefill 已经产生的两个结果, 让 draft prefill 多向前推进一步:
 
-greedy 解码下, target 的下一个 token 在建树前已经确定:
+- `recovery_logits`: target 对下一个 token 的预测.
+- `acts_all` 的最后一个特征: target 最后一个位置的 hidden feature.
+
+## 当前流程
+
+假设 target 前缀为 `x0 ... x(P-1)`, 对应特征为 `f0 ... f(P-1)`.
+
+target prefill 后已经得到:
 
 ```python
-target_root_token = recovery_logits.argmax()
+first_target_token = recovery_logits.argmax()  # 确定的 xP
+last_target_feature = acts_all[:, -1:, :]       # f(P-1)
 ```
 
-因此可以提前利用这个结果, 减少无效建树和 verify.
-
-## 方案一: 根节点不在 draft 候选中时提前返回
-
-### 逻辑
-
-1. 从 `recovery_logits` 算出 `target_root_token`.
-2. 根据 `draft_state.root_logits` 得到 draft 根层 top-k 候选.
-3. 如果 `target_root_token` 不在候选中, 直接返回 `[target_root_token]`.
-4. 如果存在, 继续当前的完整建树和 verify 流程.
-
-### 为什么结果不变
-
-target 根 token 不在任何根层候选中, 意味着所有路径都会在第 0 个位置被拒绝. 当前 verify 最终也只会返回 `target_root_token`, 所以提前返回与原来的结果相同.
-
-### 收益和代价
-
-- 收益: 避免必然失败情况下的整棵 draft 树构建和 target 树 verify.
-- 代价: 每轮多一次 draft 根层 top-k 和成员判断, 成本很小.
-- 改动范围: 只改 `generate_step_payload()`, 不需要改树结构和 verify.
-
-## 方案二: 强制使用 target 根 token, 再展开子树
-
-### 逻辑
-
-1. 直接把 `target_root_token` 作为唯一根节点, 不再使用 draft 根层 top-k 选择根节点.
-2. 将这个 token 输入 `draft_model.step()`.
-3. draft 基于自己的 `root_hidden` 和 KV, 继续预测根节点的子候选.
-4. 按现有规则扩展后续树节点并进行 target verify.
-
-第一轮的树形变化示例:
+但当前 draft prefill 只消费到:
 
 ```text
-当前: 多个 draft 根候选, 每个根候选再继续展开
-改后: target 根 token 作为唯一根, 只展开它的后续候选
+token x(P-1) + feature f(P-2)
 ```
 
-### 正确性
+所以当前 draft 的 `root_logits` 仍然在预测 `xP`, 而这个 token 其实已经被 target 的 `recovery_logits` 确定了.
 
-- 根节点来自 target greedy, 所以根节点本身一定正确.
-- 后续 draft token 仍然逐层接受 target verify, 不能直接默认接受.
-- 因此最终输出仍可与 target 单独 greedy 保持一致.
+## 优化后的流程
 
-### 注意点
+### 1. 先正常执行 draft prefill
 
-- target 根 token 仍需参与 verify forward, 因为需要它之后的 hidden 和 logits 来检查子节点.
-- 第一版可以保留现有根节点比较逻辑, 此时比较必然相等, 改动更小.
-- target 根 token 可能是 draft 不太擅长的路径, 后续接受长度不一定提升.
-- 单一根节点减少了根层宽度, 但可以把树节点预算用于更深的后续候选.
+保持当前输入不变:
 
-### 需要实验确认
+```text
+(x1, f0), (x2, f1), ..., (x(P-1), f(P-2))
+```
 
-- 平均接受 token 数 `accepted_tokens / rounds`.
-- draft 建树耗时.
-- target verify 耗时.
-- 端到端 tokens/s 和相对 HF greedy 的 speedup.
+得到 draft 的初始 KV 和 hidden.
+
+### 2. 直接消费 target 已经确定的 token
+
+把下面这一对输入追加给 draft:
+
+```text
+first_target_token + last_target_feature
+```
+
+也就是:
+
+```text
+xP + f(P-1) -> draft -> 更新 draft KV 和 hidden
+```
+
+这里的 `first_target_token` 来自 `recovery_logits.argmax()`, 不是让 draft 再猜一次.
+
+`last_target_feature` 是 target 的真实 hidden feature, 不是 draft 预测的 hidden.
+
+### 3. 从下一个位置开始建树
+
+追加后, draft 的 `root_logits` 预测的是 `x(P+1)`, 而不是 `xP`.
+
+因此后续建树可以直接从 `x(P+1)` 的候选开始, 不再让 draft 为已经确定的 `xP` 重新提供根层候选.
+
+## target verify 是否需要改变
+
+target verify 仍然独立执行, 不需要和 draft prefill 混在一起.
+
+但 target 必须先处理 `xP`, 才能得到用于检查 `x(P+1)` 的 logits. 可以让 `xP` 作为 verify 中的已确定根节点, 后续 draft 候选挂在它下面, 验证规则保持不变.
+
+最终只有 `xP` 可以直接接受, 后面的 draft token 仍然必须逐个通过 target verify.
+
+## 状态更新必须同步调整
+
+这个方案会让 draft 比 `out_ids` 提前消费一个 token, 因此不能直接套用当前长度和更新逻辑:
+
+- `draft_state.prefix_len` 需要反映 draft 实际消费到的位置.
+- `draft_kv_length` 需要与已经追加的 draft KV 一致.
+- verify 后更新 draft 时, 不能再次把 `xP` 写入 KV, 否则会产生重复 KV.
+- `_update_draft_after_verify()` 需要跳过已经被 prefill 消费的 token, 只处理后续接受的 token.
+
+首版可以只修改首次 prefill, 先验证正确性. 如果每轮更新都使用同样的提前消费方式, 也需要处理相同的状态对齐问题.
+
+## 预期收益
+
+- 避免 draft 为已经确定的 `xP` 再做无效根层猜测.
+- draft 的下一步可以使用 target 真实特征, 减少对预测 hidden 的依赖.
+- 可能减少根节点不匹配导致的整棵树浪费.
+
+## 代价和风险
+
+- 多一次 draft 单 token 计算.
+- draft 状态与 `out_ids` 的对应关系更复杂, 必须重点检查 KV 是否重复或错位.
+- target 仍需要计算 `xP` 之后的 logits, 所以不一定减少 target forward.
+- 是否提升接受率和端到端速度需要实验确认.
+
+## 验证指标
+
 - 与 target 单独 greedy 的 lossless 一致性.
-
-## 建议顺序
-
-先实现方案一, 因为它改动小且结果路径基本不变. 再单独实验方案二, 确认接受率和端到端速度是否真的提升.
+- draft KV 长度和 RoPE 位置是否连续且无重复.
+- 平均接受 token 数 `accepted_tokens / rounds`.
+- 端到端 tokens/s 和相对 HF greedy 的 speedup.
