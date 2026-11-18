@@ -300,6 +300,12 @@ def main() -> None:
     parser.add_argument(
         "--num-steps", type=int, default=8, help="draft 树的最大深度(根到叶的层数)"
     )
+    parser.add_argument(
+        "--max-tree-nodes",
+        type=int,
+        default=64,
+        help="draft 节点总预算(BFS 硬截断); 预算不够时 num_steps 调大也长不到那个深度",
+    )
     parser.add_argument("--verify-backend", default="triton_tree")
     parser.add_argument(
         "--verify-mode",
@@ -347,7 +353,7 @@ def main() -> None:
     config = Eagle3SglConfig(
         topk=command_line_args.topk,
         num_steps=command_line_args.num_steps,
-        max_tree_nodes=64,
+        max_tree_nodes=command_line_args.max_tree_nodes,
         verify_mode=command_line_args.verify_mode,
         verify_attn_backend=command_line_args.verify_backend,
     )
@@ -529,7 +535,7 @@ def main() -> None:
         f"mode={mode} dtype={command_line_args.dtype} explain={command_line_args.explain}",
         f"target={target_id} draft={draft_id}",
         f"num_prompts={len(summary.results)} max_new_tokens={command_line_args.max_new_tokens}",
-        f"tree: topk(width)={command_line_args.topk} num_steps(depth)={command_line_args.num_steps} max_tree_nodes=64",
+        f"tree: topk(width)={command_line_args.topk} num_steps(depth)={command_line_args.num_steps} max_tree_nodes={command_line_args.max_tree_nodes}",
         f"total_new_tokens={total_new} total_rounds={total_rounds}",
         f"accepted_tokens={total_accepted} proposed_draft_tokens={total_proposed}",
         f"tau(accept_length)={tau:.3f} proposed/round={proposed_per_round:.3f}",
