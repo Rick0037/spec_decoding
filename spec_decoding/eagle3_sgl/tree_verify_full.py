@@ -91,12 +91,14 @@ def _forward_target_tree_and_restore_cache(
     """
     before = int(past_key_values.get_seq_length())
 
+    # position_ids 必须显式传: 树节点的位置是按深度给的(同一层共享一个位置),
+    # 不传时 HF 会按 arange(past_len, past_len+L) 递增推导 -> 每个节点 RoPE 位置全错.
     out = target_m(
         tree_tokens,  # [batch_size, seq_len]
         past_key_values=past_key_values,
+        position_ids=position_ids,
         use_cache=True,
         attention_mask=attention_mask,
-        **position_ids,
     )
     # out.logits -> [batch_size, seq_len, voc_size]
     logits0 = out.logits[0]  # [seq_len, voc_size]
@@ -200,15 +202,11 @@ def full_tree_verify_extend(
         layout, past_len, device=device, dtype=dtype
     ).view(1, 1, L, past_len + L)
     pos = layout_tree_position_ids(layout, past_len, rope_delta).unsqueeze(0).to(device)
-    position_kwargs = {}
-    if rope_delta != 0:
-        # 多模态才需要显式 position_ids; GPT2/Llama 的 forward 不接受该参数.
-        position_kwargs["position_ids"] = pos
     node_logits = _forward_target_tree_and_restore_cache(
         target_m,
         tree_tokens,
         past_key_values,
-        position_ids=position_kwargs,
+        position_ids=pos,
         attention_mask=cross,
     )  # [L, V]
     return _select_append_root_child(
@@ -245,9 +243,6 @@ def full_tree_verify_triton(
     # * past_len = 6, layout -> [0, 0, 1, 1, 1, 1]
     # * pos->[6,6,7,7,7,7]
     pos = layout_tree_position_ids(layout, past_len, rope_delta).unsqueeze(0).to(device)
-    position_kwargs = {}
-    if rope_delta != 0:
-        position_kwargs["position_ids"] = pos
     # * 创建
     meta = build_triton_tree_verify_metadata(layout, past_len, device=device)
     decoder = _decoder_stack(target_m)
@@ -259,7 +254,7 @@ def full_tree_verify_triton(
             target_m,
             tree_tokens,
             past_key_values,  # * 从runner 中就一直是引用传递, 先增加
-            position_ids=position_kwargs,
+            position_ids=pos,
             attention_mask=torch.ones(1, L, device=device, dtype=torch.long),
         )
         # [L, V]
