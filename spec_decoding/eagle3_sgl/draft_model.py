@@ -124,7 +124,7 @@ class _Eagle3MidLayer(nn.Module):
         hidden: torch.Tensor,
         positions: torch.Tensor,
     ):
-        # * 只返回了提示词得kv, 没有返回new token
+        # * `prefill` : 一次算多个位置, 需要因果 mask.
         b, S, _ = embeds.shape
         residual = hidden
         e = self.input_layernorm(embeds)
@@ -160,6 +160,7 @@ class _Eagle3MidLayer(nn.Module):
         start_position: int,
     ):
         """在 past_kv 上批量 extend A 个新 token(一次 SDPA,比逐步 step 快)."""
+        # * 一次算多个新 token, 需要手动因果 mask.
         b, A, _ = embeds.shape
         residual = hidden
         e = self.input_layernorm(embeds)
@@ -208,6 +209,7 @@ class _Eagle3MidLayer(nn.Module):
         past_kv,
         position: int,
     ):
+        # * 只算当前一个位置, 全部现有 KV 都能看, 不需要 mask.
         b = embeds.shape[0]
         residual = hidden
         e = self.input_layernorm(embeds)
@@ -361,7 +363,7 @@ class Eagle3SglDraftModel(nn.Module):
         past_kv
             已有 draft KV (k, v) 或 None。
         position
-            RoPE 绝对位置(树内 = past_len - 1 + depth)。
+            RoPE 绝对位置(树内 = draft_kv_length + depth - 1)。
 
         Returns
         -------

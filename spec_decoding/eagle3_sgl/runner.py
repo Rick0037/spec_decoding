@@ -31,11 +31,8 @@ from transformers import PreTrainedModel
 
 from .config import Eagle3SglConfig
 from .hidden import select_eagle_acts_from_hidden_states
-from .tree_draft import (
-    TreeDraftResult,
-    expand_draft_tree_ar,
-    tree_draft_to_verify_layout,
-)
+from .tree_draft import expand_draft_tree_ar
+from .tree_verify_mask import TreeLayout
 from .tree_verify_attn import triton_extend_available
 from .tree_verify_full import (
     full_tree_verify_extend,
@@ -201,20 +198,22 @@ class Eagle3SglGenerator:
         self,
         prefix_ids: torch.LongTensor,
         draft_state: _DraftKvState,
-    ) -> TreeDraftResult:
+    ) -> TreeLayout:
         """用 AR draft 的 KV 和递归 hidden 构造 top-k 树。"""
         if draft_state.prefix_len != int(prefix_ids.shape[1]):
             raise ValueError(
                 f"draft_state.prefix_len {draft_state.prefix_len} != "
                 f"prefix len {prefix_ids.shape[1]}"
             )
+        # * target 的 21 个 token, 对应 draft 的`21-1=20` 条 KV.
+        # * 所以传进来的`draft_kv_length=20` 实际表示 draft 已有 KV 数量.
         return expand_draft_tree_ar(
             self.cfg,
             self.draft_model,
             draft_state.root_logits,
             draft_state.root_hidden,
             draft_state.kv,
-            int(prefix_ids.shape[1]) - 1,
+            draft_kv_length=int(prefix_ids.shape[1]) - 1,
             device=prefix_ids.device,
         )
 
@@ -229,12 +228,12 @@ class Eagle3SglGenerator:
         recovery_logits: Optional[torch.Tensor] = None,
         draft_state: Optional[_DraftKvState] = None,
     ) -> torch.LongTensor:
-        """单轮投机，返回本轮采纳的 token [1, A]。
+        """单轮投机，返回本轮采纳的 token [batch_size == 1, accpect_len]
 
         Parameters
         ----------
         full_prefix_ids
-            当前已接受序列 [1, P](prompt + 此前各轮 append)。
+            当前已接受序列 [batch_size == 1, accpect_len] (prompt + 此前各轮 append)。
         past_before
             target 对 full_prefix_ids 的 KV cache;extend verify 在其上临时 extend 后 crop。
         recovery_logits
@@ -244,11 +243,11 @@ class Eagle3SglGenerator:
         """
         device = full_prefix_ids.device
         # ① AR 建树
-        draft_res = self._build_tree(full_prefix_ids, draft_state)
-        layout = tree_draft_to_verify_layout(draft_res)
+        layout = self._build_tree(full_prefix_ids, draft_state)
 
         past_len = int(full_prefix_ids.shape[1])
-        leaves = _leaf_indices(draft_res.parent)
+        # * 找到所有的叶子节点
+        leaves = _leaf_indices(layout.parent)
         # 退化:树只有空或无叶节点时,等价于投机解码失败,直接 target生成下一 token
         if not leaves:
             _, nxt = _verify_path_clean(self.target_m, full_prefix_ids, [], device)
@@ -271,10 +270,14 @@ class Eagle3SglGenerator:
             verify_fn = (
                 full_tree_verify_triton if use_triton else full_tree_verify_extend
             )
+            # import pdb
+
+            # pdb.set_trace()
+            # * layout 还没有进行剪枝, 非常大
             append_list = verify_fn(
                 self.target_m,
                 layout,
-                past_before,
+                past_before,  # * 实际 past kv cache的数据结构
                 past_len,
                 recovery_logits,
                 leaves=leaves,
@@ -287,13 +290,13 @@ class Eagle3SglGenerator:
         best_next = 0
         best_leaf = 0
         for leaf in leaves:
-            path = _path_tokens_to_leaf(draft_res.parent, draft_res.token_ids, leaf)
+            path = _path_tokens_to_leaf(layout.parent, layout.token_ids, leaf)
             mlen, nxt = _verify_path_clean(self.target_m, full_prefix_ids, path, device)
             # 接受数相同时保留排在前面的路径(与 extend verify 一致)
             if mlen > best_m:
                 best_m, best_next, best_leaf = mlen, nxt, leaf
 
-        path = _path_tokens_to_leaf(draft_res.parent, draft_res.token_ids, best_leaf)
+        path = _path_tokens_to_leaf(layout.parent, layout.token_ids, best_leaf)
         append_list = path[:best_m] + [best_next]
         return torch.tensor([append_list], device=device, dtype=torch.long)
 

@@ -24,7 +24,7 @@ import torch.nn as nn
 from transformers import PreTrainedModel
 
 from .tree_verify_mask import (
-    TreeVerifyLayout,
+    TreeLayout,
     build_tree_cross_attn_bias_with_prefix,
     layout_tree_position_ids,
 )
@@ -85,7 +85,7 @@ def _forward_target_tree_and_restore_cache(
     实际不应该加入到cache中
     """
     before = int(past_key_values.get_seq_length())
-    # * 实际推理
+
     out = target_m(
         tree_tokens,  # [batch_size, seq_len]
         past_key_values=past_key_values,
@@ -101,17 +101,32 @@ def _forward_target_tree_and_restore_cache(
 
 
 def _select_append_root_child(
-    all_node_logits: torch.Tensor,
+    tree_node_next_token_logits: torch.Tensor,
     root_logits: torch.Tensor,
     parent: List[int],
     token_ids: List[int],
     leaves: List[int],
 ) -> List[int]:
-    """在所有根→叶路径中选接受最长的一条,返回本轮要 append 的 token."""
+    """
+    第一次 prefill:
+    输出 = target(["The", "cat"])
+    输出[0] = 看完 "The" 的预测
+    输出[1] = 看完 "cat" 的预测  # 保存为 recovery_logits
+
+    第二次 verify, 输入只有 draft token:
+    输出 = target(["sat", "mat"], past_key_values="The cat 的 KV")
+    tree_node_next_token_logits[0] = 看完 "sat" 的预测
+    tree_node_next_token_logits[1] = 看完 "mat" 的预测
+
+    root_logits          -> 检查第 0 个 draft token
+    tree_node_next_token_logits[0]   -> 检查第 1 个 draft token
+    tree_node_next_token_logits[1]   -> 检查第 2 个 draft token
+    tree_node_next_token_logits[2]   -> 检查第 3 个 draft token
+    """
     best_accepted_len, best_next_token, best_leaf = -1, 0, 0
     for leaf in leaves:
         accepted_len, next_token = _match_one_leaf_path(
-            all_node_logits, root_logits, parent, token_ids, leaf
+            tree_node_next_token_logits, root_logits, parent, token_ids, leaf
         )
         if accepted_len > best_accepted_len:  # 接受数相同时,保留排在前面的路径
             best_accepted_len, best_next_token, best_leaf = (
@@ -122,11 +137,12 @@ def _select_append_root_child(
 
     best_path_nodes = path_node_indices_root_to_leaf(parent, best_leaf)
     best_path_tokens = [token_ids[i] for i in best_path_nodes]
+    # ! 接收长度的token + 一个 target的 next new token
     return best_path_tokens[:best_accepted_len] + [best_next_token]
 
 
 def _match_one_leaf_path(
-    all_node_logits: torch.Tensor,
+    tree_node_next_token_logits: torch.Tensor,
     root_logits: torch.Tensor,
     parent: List[int],
     token_ids: List[int],
@@ -136,25 +152,28 @@ def _match_one_leaf_path(
 
     对齐规则:路径上第 pos 个节点提案的 token,由它父节点的输出 logits 预测——
     pos=0 没有父(直接挂前缀后),用 root_logits(前缀末位的预测);
-    pos>0 用 all_node_logits[父]。首个不一致即停,下一位给 target 的修正;
+    pos>0 用 tree_node_next_token_logits[父]。首个不一致即停,下一位给 target 的修正;
     全中则下一位是叶节点自己的 argmax(bonus)。
     """
     path_nodes = path_node_indices_root_to_leaf(parent, leaf)
     for pos, node_idx in enumerate(path_nodes):
         #! 预测源:根节点用 root_logits,其余用父节点的输出 logits
         source_logits = (
-            root_logits if pos == 0 else all_node_logits[path_nodes[pos - 1]]
+            root_logits
+            if pos == 0
+            else tree_node_next_token_logits[path_nodes[pos - 1]]
         )
         target_token = int(source_logits.argmax(dim=-1).item())
         if target_token != token_ids[node_idx]:
             return pos, target_token  # 接受前 pos 个,第 pos+1 位用 target 修正
-    return len(path_nodes), int(all_node_logits[path_nodes[-1]].argmax(dim=-1).item())
+    next_token_logits = tree_node_next_token_logits[path_nodes[-1]]
+    return len(path_nodes), int(next_token_logits.argmax(dim=-1).item())
 
 
 @torch.inference_mode()
 def full_tree_verify_extend(
     target_m: PreTrainedModel,
-    layout: TreeVerifyLayout,
+    layout: TreeLayout,
     past_key_values: Any,
     past_len: int,
     recovery_logits: torch.Tensor,
@@ -184,7 +203,7 @@ def full_tree_verify_extend(
 @torch.inference_mode()
 def full_tree_verify_triton(
     target_m: PreTrainedModel,
-    layout: TreeVerifyLayout,
+    layout: TreeLayout,
     past_key_values: Any,
     past_len: int,
     root_logits: torch.Tensor,
@@ -199,7 +218,7 @@ def full_tree_verify_triton(
     """
     L = len(layout)  # draft_lens
     # (Pdb) layout
-    # TreeVerifyLayout(token_ids=[23557, 18160, 18160, 23557, 23557, 18160],
+    # TreeLayout(token_ids=[23557, 18160, 18160, 23557, 23557, 18160],
     # parent=[-1, -1, 0, 0, 1, 1])
     # import pdb
 
@@ -216,10 +235,10 @@ def full_tree_verify_triton(
     # ! with tree_verify_triton_attention_context 实际上就是使用 trition kernel 去替换linear中的
     # * 每次都需要重新建树, 重新替换attention之后验证, 然后 再替换回去
     with tree_verify_triton_attention_context(decoder, meta):
-        all_node_logits = _forward_target_tree_and_restore_cache(
+        tree_node_next_token_logits = _forward_target_tree_and_restore_cache(
             target_m,
             tree_tokens,
-            past_key_values,  # * 从runner 中就一直是引用传递
+            past_key_values,  # * 从runner 中就一直是引用传递, 先增加
             position_ids=pos,
             attention_mask=torch.ones(1, L, device=device, dtype=torch.long),
         )
@@ -227,5 +246,9 @@ def full_tree_verify_triton(
     # * 一次验证的逻辑, 贪心, 没有对比draft 以及 target的logits, 直接one-hot对比输出
     # * node_logits == logit[0] -> [seq_len, vob_size]
     return _select_append_root_child(
-        all_node_logits, root_logits, layout.parent, layout.token_ids, leaves
+        tree_node_next_token_logits,
+        root_logits,
+        layout.parent,
+        layout.token_ids,
+        leaves,
     )

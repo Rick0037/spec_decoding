@@ -31,7 +31,7 @@ import torch
 # forward 里新 token 段的第 i 列对齐后即可套树掩码.
 # -----------------------------------------------------------------------------
 @dataclass
-class TreeVerifyLayout:
+class TreeLayout:
     """
     draft 树的「摊平」表示:把树拍成一个长度为 L 的节点数组,供一次 verify 前向使用。
 
@@ -64,9 +64,7 @@ def node_depth_from_root(parent: List[int], node: int) -> int:
     return d
 
 
-def layout_tree_position_ids(
-    layout: TreeVerifyLayout, past_len: int
-) -> torch.LongTensor:
+def layout_tree_position_ids(layout: TreeLayout, past_len: int) -> torch.LongTensor:
     """Absolute position_ids for batched tree verify, shape [L]."""
     depths = [node_depth_from_root(layout.parent, i) for i in range(len(layout))]
     return torch.tensor(depths, dtype=torch.long) + int(past_len)
@@ -86,7 +84,7 @@ def _on_tree_path(parent: Sequence[int], anc: int, desc: int) -> bool:
 
 # 用于tree attention verify,attention_bias即表示attention_mask
 def build_tree_cross_attn_bias_with_prefix(
-    layout: TreeVerifyLayout,
+    layout: TreeLayout,
     past_seq_len: int,
     *,
     device: torch.device,
@@ -104,12 +102,14 @@ def build_tree_cross_attn_bias_with_prefix(
     返回 [L, past_seq_len + L],可直接广播到
     scaled_dot_product_attention 的 attn_mask(additive,禁止处为 -inf)。
     """
+    #!  bias[i, j] 允许节点`i` attend 位置`j`
     n = len(layout)
     if n == 0:
         return torch.zeros(0, past_seq_len, device=device, dtype=dtype)
 
     neg = torch.finfo(dtype).min  # * 默认数值
     bias = torch.full((n, past_seq_len + n), neg, device=device, dtype=dtype)
+    # * q -> draft_len, kv -> past + draft_len
     # (Pdb) bias.shape
     # torch.Size([6, 12])
     # ! [n, past_seq_len+n] -> (q, k) 相乘
@@ -120,7 +120,7 @@ def build_tree_cross_attn_bias_with_prefix(
                 bias[i, j] = 0.0
             else:
                 # TODO by ruixuan 计算复杂度可以优化
-                # * 如果能看到 或者在path上不mask
+                # * 如果i 看向 j . 再path上就不mask掉
                 k = j - past_seq_len
                 if _on_tree_path(layout.parent, k, i):
                     bias[i, j] = 0.0

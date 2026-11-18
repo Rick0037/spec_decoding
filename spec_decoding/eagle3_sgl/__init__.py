@@ -14,13 +14,9 @@ from __future__ import annotations
 from typing import Any
 
 from .config import Eagle3SglConfig
-from .tree_draft import (
-    TreeDraftResult,
-    expand_draft_tree_ar,
-    tree_draft_to_verify_layout,
-)
+from .tree_draft import expand_draft_tree_ar
 from .tree_verify_mask import (
-    TreeVerifyLayout,
+    TreeLayout,
     build_tree_cross_attn_bias_with_prefix,
 )
 
@@ -30,12 +26,10 @@ __all__ = [
     "Eagle3SglDraftModel",
     "build_eagle3_sgl_draft",
     "load_eagle3_draft_weights",
-    "TreeDraftResult",
-    "TreeVerifyLayout",
+    "TreeLayout",
     "build_tree_cross_attn_bias_with_prefix",
     "expand_draft_tree_ar",
     "forward_target_eagle_acts",
-    "tree_draft_to_verify_layout",
     "triton_extend_available",
 ]
 

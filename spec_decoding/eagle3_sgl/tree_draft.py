@@ -3,20 +3,12 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
 from typing import List
 
 import torch
 
 from .config import Eagle3SglConfig
-
-
-@dataclass
-class TreeDraftResult:
-    """摊平后的 draft 树。"""
-
-    token_ids: List[int]
-    parent: List[int]
+from .tree_verify_mask import TreeLayout
 
 
 def expand_draft_tree_ar(
@@ -25,10 +17,10 @@ def expand_draft_tree_ar(
     root_logits: torch.Tensor,
     root_hidden: torch.Tensor,
     root_kv,
-    past_len: int,
+    draft_kv_length: int,
     *,
     device: torch.device,
-) -> TreeDraftResult:
+) -> TreeLayout:
     """按 BFS 顺序构造 top-k 树，每个分支独立延续自己的 hidden 和 KV。"""
     topk = cfg.topk
     if topk < 1 or cfg.max_tree_nodes < 1:
@@ -66,12 +58,15 @@ def expand_draft_tree_ar(
             draft_input_ids,
             parent_hidden,
             parent_kv,
-            past_len - 1 + node_depth,
+            # *`node_depth` 从 1 开始, 要转成从 0 开始的偏移.
+            draft_kv_length + node_depth - 1,
         )
         child_topk_ids, _ = draft_model.convert_to_target_topk_token_ids(
             child_logits, topk
         )
-        for child_token_id in [int(token) for token in child_topk_ids[0, :topk].tolist()]:
+        for child_token_id in [
+            int(token) for token in child_topk_ids[0, :topk].tolist()
+        ]:
             if len(token_ids) >= cfg.max_tree_nodes:
                 break
             child_index = len(token_ids)
@@ -87,14 +82,4 @@ def expand_draft_tree_ar(
                 )
             )
 
-    return TreeDraftResult(token_ids=token_ids, parent=parent)
-
-
-def tree_draft_to_verify_layout(draft: TreeDraftResult) -> "TreeVerifyLayout":
-    """把 draft 树转换为 verify 使用的摊平布局。"""
-    from .tree_verify_mask import TreeVerifyLayout
-
-    return TreeVerifyLayout(
-        token_ids=list(draft.token_ids),
-        parent=list(draft.parent),
-    )
+    return TreeLayout(token_ids=token_ids, parent=parent)

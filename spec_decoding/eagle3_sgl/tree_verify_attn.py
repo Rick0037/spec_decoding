@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 
 from .tree_verify_mask import (
-    TreeVerifyLayout,
+    TreeLayout,
     build_tree_cross_attn_bias_with_prefix,
 )
 
@@ -60,7 +60,7 @@ class TritonTreeVerifyMetadata:
 
 
 def build_triton_tree_verify_metadata(
-    layout: TreeVerifyLayout,
+    layout: TreeLayout,
     past_len: int,
     *,
     device: torch.device,
@@ -273,6 +273,7 @@ def tree_verify_triton_attention_context(
     try:
         yield
     finally:
+        # * 当程序 离开对应的`with tree_verify_triton_attention_context(...)` 代码块 时触发
         for attn, orig in originals:
             attn.forward = orig
             if hasattr(attn, "_llmqrt_triton_meta"):
