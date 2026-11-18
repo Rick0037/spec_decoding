@@ -46,11 +46,16 @@ def path_node_indices_root_to_leaf(parent: List[int], leaf: int) -> List[int]:
 
 
 def _decoder_stack(target_m: PreTrainedModel) -> nn.Module:
-    if hasattr(target_m, "model") and isinstance(getattr(target_m, "model"), nn.Module):
-        return target_m.model
-    raise TypeError(
-        "full_model_tree verify expects a HF CausalLM with .model (e.g. Llama/Qwen)"
-    )
+    inner = getattr(target_m, "model", None)
+    if not isinstance(inner, nn.Module):
+        raise TypeError(
+            "full_model_tree verify expects a HF CausalLM with .model (e.g. Llama/Qwen)"
+        )
+    # 多模态模型(如 Qwen3-VL)的 decoder 层在 model.language_model.layers.
+    language_model = getattr(inner, "language_model", None)
+    if getattr(inner, "layers", None) is None and isinstance(language_model, nn.Module):
+        return language_model
+    return inner
 
 
 # -----------------------------------------------------------------------------
@@ -89,9 +94,9 @@ def _forward_target_tree_and_restore_cache(
     out = target_m(
         tree_tokens,  # [batch_size, seq_len]
         past_key_values=past_key_values,
-        position_ids=position_ids,
         use_cache=True,
         attention_mask=attention_mask,
+        **position_ids,
     )
     # out.logits -> [batch_size, seq_len, voc_size]
     logits0 = out.logits[0]  # [seq_len, voc_size]
@@ -182,6 +187,7 @@ def full_tree_verify_extend(
     *,
     leaves: List[int],
     device: torch.device,
+    rope_delta: int = 0,
 ) -> Tuple[List[int], int]:
     """复用前缀 KV 的 extend 树掩码 verify(HF sdpa + 4D 树 cross mask):只前向 L 个树节点。
 
@@ -193,9 +199,17 @@ def full_tree_verify_extend(
     cross = build_tree_cross_attn_bias_with_prefix(
         layout, past_len, device=device, dtype=dtype
     ).view(1, 1, L, past_len + L)
-    pos = layout_tree_position_ids(layout, past_len).unsqueeze(0).to(device)
+    pos = layout_tree_position_ids(layout, past_len, rope_delta).unsqueeze(0).to(device)
+    position_kwargs = {}
+    if rope_delta != 0:
+        # 多模态才需要显式 position_ids; GPT2/Llama 的 forward 不接受该参数.
+        position_kwargs["position_ids"] = pos
     node_logits = _forward_target_tree_and_restore_cache(
-        target_m, tree_tokens, past_key_values, position_ids=pos, attention_mask=cross
+        target_m,
+        tree_tokens,
+        past_key_values,
+        position_ids=position_kwargs,
+        attention_mask=cross,
     )  # [L, V]
     return _select_append_root_child(
         node_logits, recovery_logits, layout.parent, layout.token_ids, leaves
@@ -212,6 +226,7 @@ def full_tree_verify_triton(
     *,
     leaves: List[int],
     device: torch.device,
+    rope_delta: int = 0,
 ) -> Tuple[List[int], int]:
     """extend verify 的 triton 版:
     复用前缀 KV,用 SGLang extend_attention_fwd + 树 custom_mask。
@@ -229,7 +244,10 @@ def full_tree_verify_triton(
     tree_tokens = torch.tensor([layout.token_ids], device=device, dtype=torch.long)
     # * past_len = 6, layout -> [0, 0, 1, 1, 1, 1]
     # * pos->[6,6,7,7,7,7]
-    pos = layout_tree_position_ids(layout, past_len).unsqueeze(0).to(device)
+    pos = layout_tree_position_ids(layout, past_len, rope_delta).unsqueeze(0).to(device)
+    position_kwargs = {}
+    if rope_delta != 0:
+        position_kwargs["position_ids"] = pos
     # * 创建
     meta = build_triton_tree_verify_metadata(layout, past_len, device=device)
     decoder = _decoder_stack(target_m)
@@ -241,7 +259,7 @@ def full_tree_verify_triton(
             target_m,
             tree_tokens,
             past_key_values,  # * 从runner 中就一直是引用传递, 先增加
-            position_ids=pos,
+            position_ids=position_kwargs,
             attention_mask=torch.ones(1, L, device=device, dtype=torch.long),
         )
         # [L, V]

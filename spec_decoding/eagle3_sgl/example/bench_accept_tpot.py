@@ -3,7 +3,17 @@
 
 做两件事:
 (1) 统计每轮 draft 提出的候选 token 数与 target 实际接受数, 输出平均接受长度 tau.
-(2) 固定 10 条 prompt + greedy 解码, 与关闭投机的 HF baseline 对比 TPOT 和端到端吞吐.
+(2) 固定 prompt 集 + greedy 解码, 与关闭投机的 baseline 对比 TPOT 和端到端吞吐.
+
+一键预设(--mode):
+- text: Llama-3.1-8B + 官方 EAGLE3 draft, 10 条固定文本 prompt.
+- vl:   Qwen3-VL-8B + 对应 EAGLE3 draft, 从 LMUData tsv 读图文样本(带图 forward).
+
+长输出: 加 --explain 让模型先分步推理再给答案. 短答案(yes/no, 选择题字母)测不出
+真实接受长度, 必须让输出足够长.
+
+dtype 注意: bf16 只有 7 位尾数, 长序列(>100 token)下 baseline 与 verify 的数值
+累积差异会导致 argmax 平局翻转, 出现假发散. 默认 float16(10 位尾数)可避免.
 
 口径说明:
 - proposed_draft_tokens: target 选中那条根->叶路径上的 draft 节点数, 不含未选中分支,
@@ -14,20 +24,48 @@
 - 端到端吞吐 = 全部 prompt 的 new_tokens 之和 / wall 之和.
 
 跑法:
+    # 纯文本
     HF_HOME=/root/autodl-tmp/hf_cache HF_HUB_OFFLINE=1 PYTHONPATH=. \
     .venv/bin/python spec_decoding/eagle3_sgl/example/bench_accept_tpot.py \
-        --target NousResearch/Meta-Llama-3.1-8B-Instruct --max-new-tokens 64
+        --mode text --max-new-tokens 128 --explain
+
+    # 多模态(带图)
+    HF_HOME=/root/autodl-tmp/hf_cache HF_HUB_OFFLINE=1 PYTHONPATH=. \
+    .venv/bin/python spec_decoding/eagle3_sgl/example/bench_accept_tpot.py \
+        --mode vl --num-prompts 3 --max-new-tokens 128 --explain
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import time
 from dataclasses import dataclass, field
 
 import torch
 
+
+# 两种模式的一键预设: target / draft / draft 权重文件名.
+MODE_PRESETS = {
+    "text": {
+        "target": "NousResearch/Meta-Llama-3.1-8B-Instruct",
+        "draft": "yuhuili/EAGLE3-LLaMA3.1-Instruct-8B",
+        "draft_weight_file": "pytorch_model.bin",
+    },
+    "vl": {
+        "target": "/root/autodl-tmp/models/Qwen3-VL-8B-Instruct",
+        "draft": "taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3",
+        "draft_weight_file": "model.safetensors",
+    },
+}
+
+DEFAULT_VL_TSV = "/root/autodl-tmp/LMUData/ChartQA_TEST.tsv"
+
+# 引导长输出的后缀: 短答案数据集必须让模型输出推理过程才测得出接受长度.
+EXPLAIN_SUFFIX = (
+    "\nExplain your reasoning step by step before giving the final answer."
+)
 
 # 固定 10 条 prompt, 覆盖解释/代码/数学/翻译/写作等不同分布.
 FIXED_PROMPTS = [

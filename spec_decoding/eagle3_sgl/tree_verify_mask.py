@@ -64,10 +64,12 @@ def node_depth_from_root(parent: List[int], node: int) -> int:
     return d
 
 
-def layout_tree_position_ids(layout: TreeLayout, past_len: int) -> torch.LongTensor:
+def layout_tree_position_ids(
+    layout: TreeLayout, past_len: int, rope_delta: int = 0
+) -> torch.LongTensor:
     """Absolute position_ids for batched tree verify, shape [L]."""
     depths = [node_depth_from_root(layout.parent, i) for i in range(len(layout))]
-    return torch.tensor(depths, dtype=torch.long) + int(past_len)
+    return torch.tensor(depths, dtype=torch.long) + int(past_len) + int(rope_delta)
 
 
 def _on_tree_path(parent: Sequence[int], anc: int, desc: int) -> bool:

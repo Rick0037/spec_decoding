@@ -197,6 +197,8 @@ class Eagle3SglGenerator:
         self.n_accepted_tokens = 0
         # target 选中路径上的 draft 候选 token 总数, 不统计未选中的分支.
         self.n_proposed_draft_tokens = 0
+        # 多模态时的 MRoPE 位置偏移(get_rope_index 的 rope_deltas); 纯文本恒为 0.
+        self._rope_delta = 0
 
     def _build_tree(
         self,
@@ -219,6 +221,7 @@ class Eagle3SglGenerator:
             draft_state.kv,
             draft_kv_length=int(prefix_ids.shape[1]) - 1,
             device=prefix_ids.device,
+            rope_delta=self._rope_delta,
         )
 
     # ------------------------------------------------------------------
@@ -286,6 +289,7 @@ class Eagle3SglGenerator:
                 recovery_logits,
                 leaves=leaves,
                 device=device,
+                rope_delta=self._rope_delta,
             )
             self.n_proposed_draft_tokens += proposed_draft_tokens
             return torch.tensor([append_list], device=device, dtype=torch.long)
@@ -307,17 +311,44 @@ class Eagle3SglGenerator:
         return torch.tensor([append_list], device=device, dtype=torch.long)
 
     def _prefill_target_and_draft(
-        self, input_ids: torch.LongTensor
+        self,
+        input_ids: torch.LongTensor,
+        multimodal_inputs: Optional[dict] = None,
     ) -> Tuple[Any, torch.Tensor, torch.Tensor, _DraftKvState]:
-        """初始化 target 和 draft, 返回第一轮需要的状态."""
+        """初始化 target 和 draft, 返回第一轮需要的状态.
+
+        multimodal_inputs: 多模态时传 pixel_values/image_grid_thw/mm_token_type_ids,
+        纯文本为 None.
+        """
         # ② Target prefill:KV + 末位 recovery_logits + 全前缀 act
         prefill_attention_mask = torch.ones_like(input_ids, device=input_ids.device)
-        prefill_outputs = self.target_m(
-            input_ids,
-            attention_mask=prefill_attention_mask,
-            use_cache=True,
-            output_hidden_states=True,
-        )
+        draft_position_ids = None
+        if multimodal_inputs is not None:
+            # 多模态: 先用 get_rope_index 算三维 position 和 rope_delta, 并传给 target.
+            position_ids, rope_deltas = self.target_m.model.get_rope_index(
+                input_ids,
+                multimodal_inputs["mm_token_type_ids"],
+                image_grid_thw=multimodal_inputs.get("image_grid_thw"),
+                attention_mask=prefill_attention_mask,
+            )
+            self._rope_delta = int(rope_deltas.flatten()[0].item())
+            draft_position_ids = position_ids
+            prefill_outputs = self.target_m(
+                input_ids,
+                attention_mask=prefill_attention_mask,
+                position_ids=position_ids,
+                use_cache=True,
+                output_hidden_states=True,
+                **multimodal_inputs,
+            )
+        else:
+            self._rope_delta = 0
+            prefill_outputs = self.target_m(
+                input_ids,
+                attention_mask=prefill_attention_mask,
+                use_cache=True,
+                output_hidden_states=True,
+            )
         past = prefill_outputs.past_key_values
         # * recovery_logits.shape -> [vob_size]
         recovery_logits = prefill_outputs.logits[0, -1]
@@ -333,7 +364,7 @@ class Eagle3SglGenerator:
         # * draft_hidden 上面这个token得hidden size
         # * draft_kv 仅仅有 prompt
         draft_logits, draft_hidden, draft_kv = self.draft_model.prefill(
-            input_ids, acts_all
+            input_ids, acts_all, position_ids=draft_position_ids
         )
         # * prefill得初始状态
         draft_state = _DraftKvState(
@@ -361,12 +392,29 @@ class Eagle3SglGenerator:
         )
         # * 实际上这里的 accepted_target_outputs 的hidden state 就仅仅又三个接收的token的hidden state了
         #! 如果这里是全部接收的情况下, 最后一个bonus token 必须补算的, 如果是中间接收的话, 这部分有冗余的
+        # Qwen3-VL 必须显式传 position_ids: 不传时它会用全长 attention_mask 的 cumsum
+        # 推 position, 而输入只有 append, 长度对不上会 reshape 错乱 / 位置错位.
+        # 其他架构(GPT2/Llama)的 forward 不接受 position_ids, 只在多模态时传.
+        forward_kwargs = {}
+        if self._rope_delta != 0:
+            append_length = int(append.shape[1])
+            forward_kwargs["position_ids"] = (
+                torch.arange(
+                    int(past.get_seq_length()),
+                    int(past.get_seq_length()) + append_length,
+                    device=append.device,
+                    dtype=torch.long,
+                )
+                .view(1, 1, -1)
+                + self._rope_delta
+            )
         accepted_target_outputs = self.target_m(
             append,
             past_key_values=past,
             use_cache=True,
             attention_mask=accepted_attention_mask,
             output_hidden_states=True,
+            **forward_kwargs,
         )
         past = accepted_target_outputs.past_key_values
         recovery_logits = accepted_target_outputs.logits[0, -1]
@@ -409,6 +457,7 @@ class Eagle3SglGenerator:
             draft_input_features,
             draft_state.kv,
             old_prefix_length - 1,
+            rope_delta=self._rope_delta,
         )
         return _DraftKvState(
             kv=draft_kv,
@@ -427,6 +476,7 @@ class Eagle3SglGenerator:
         *,
         max_new_tokens: int,
         eos_token_id: Optional[int] = None,
+        multimodal_inputs: Optional[dict] = None,
     ) -> torch.LongTensor:
         """
         generate 主流程, prefill target -> prefill draft
@@ -439,7 +489,9 @@ class Eagle3SglGenerator:
             recovery_logits,
             acts_all,
             draft_state,
-        ) = self._prefill_target_and_draft(out_ids)
+        ) = self._prefill_target_and_draft(
+            out_ids, multimodal_inputs=multimodal_inputs
+        )
 
         while num_new_tokens < max_new_tokens:
             if eos_token_id is not None and out_ids[0, -1].item() == eos_token_id:

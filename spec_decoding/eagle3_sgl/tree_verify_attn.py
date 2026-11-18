@@ -28,6 +28,7 @@ _TRITON_SUPPORTED_ATTN = frozenset(
         "Qwen3Attention",
         "MistralAttention",
         "Gemma2Attention",
+        "Qwen3VLTextAttention",
     }
 )
 
@@ -178,6 +179,13 @@ def _triton_tree_attn_forward(
     value_states = (
         module.v_proj(hidden_states).view(bsz, q_len, num_kv, head_dim).transpose(1, 2)
     )
+    # Qwen3/Qwen3-VL 在 RoPE 之前有 per-head q_norm/k_norm, Llama 没有; 按存在性施加.
+    q_norm = getattr(module, "q_norm", None)
+    if q_norm is not None:
+        query_states = q_norm(query_states)
+    k_norm = getattr(module, "k_norm", None)
+    if k_norm is not None:
+        key_states = k_norm(key_states)
 
     # * [batch, seq_len, num_heads,  head_dim] -> [batch, num_heads, seq_len, head_dim]
 

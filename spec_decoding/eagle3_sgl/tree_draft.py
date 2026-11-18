@@ -20,6 +20,7 @@ def expand_draft_tree_ar(
     draft_kv_length: int,
     *,
     device: torch.device,
+    rope_delta: int = 0,
 ) -> TreeLayout:
     """按 BFS 顺序构造 top-k 树，每个分支独立延续自己的 hidden 和 KV。"""
     topk = cfg.topk
@@ -59,7 +60,7 @@ def expand_draft_tree_ar(
             parent_hidden,
             parent_kv,
             # *`node_depth` 从 1 开始, 要转成从 0 开始的偏移.
-            draft_kv_length + node_depth - 1,
+            draft_kv_length + node_depth - 1 + rope_delta,
         )
         child_topk_ids, _ = draft_model.convert_to_target_topk_token_ids(
             child_logits, topk

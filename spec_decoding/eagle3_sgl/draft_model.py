@@ -84,9 +84,12 @@ class _Eagle3MidLayer(nn.Module):
         n_kv_heads: int = None,
         rope_base: float = 10000.0,
         eps: float = 1e-6,
+        mrope_section: Optional[List[int]] = None,
         **fk,
     ) -> None:
         super().__init__()
+        # 多模态 MRoPE 的频率分段(如 Qwen3-VL [24,20,20]); None 表示标准一维 RoPE.
+        self.mrope_section = mrope_section
         self.n_heads = n_heads
         self.n_kv_heads = n_kv_heads if n_kv_heads is not None else n_heads
         self.head_dim = hidden // n_heads
@@ -110,11 +113,30 @@ class _Eagle3MidLayer(nn.Module):
         self.up_proj = nn.Linear(hidden, intermediate, bias=False, **fk)
         self.down_proj = nn.Linear(intermediate, hidden, bias=False, **fk)
 
+    def _mrope_recomposition(self, freq: torch.Tensor) -> torch.Tensor:
+        """按 mrope_section 交错重组三轴频率, 对齐 Qwen3-VL 的 MRoPE.
+
+        freq: (3, bs, seq, head_dim//2). 文本-only 三轴相同, 此操作恒等.
+        返回 (bs, seq, head_dim).
+        """
+        freqs_thw = freq[0]
+        for dim, offset in enumerate((1, 2), start=1):
+            length = self.mrope_section[dim] * 3
+            idx = slice(offset, length, 3)
+            freqs_thw[..., idx] = freq[dim, ..., idx]
+        return torch.cat((freqs_thw, freqs_thw), dim=-1)
+
     def _rope_cos_sin(self, positions: torch.Tensor, device, dtype) -> tuple:
+        inv_freq = self.inv_freq.to(device=device, dtype=torch.float32)
+        if positions.dim() == 3:
+            # 多模态: positions (3, bs, seq), 图像段是三维网格, 文本段三轴相同.
+            freqs = positions.to(device=device, dtype=torch.float32)[..., None] * inv_freq
+            cos = self._mrope_recomposition(freqs.cos())
+            sin = self._mrope_recomposition(freqs.sin())
+            return cos.to(dtype), sin.to(dtype)
+        # 文本: positions 一维 [seq], 标准 RoPE(cat 布局).
         pos = positions.to(device=device, dtype=torch.float32).view(-1)
-        freqs = (
-            pos[:, None] * self.inv_freq.to(device=device, dtype=torch.float32)[None, :]
-        )
+        freqs = pos[:, None] * inv_freq[None, :]
         emb = torch.cat([freqs, freqs], dim=-1)
         return emb.cos(), emb.sin()
 
@@ -158,6 +180,7 @@ class _Eagle3MidLayer(nn.Module):
         hidden: torch.Tensor,
         past_kv,
         start_position: int,
+        rope_delta: int = 0,
     ):
         """在 past_kv 上批量 extend A 个新 token(一次 SDPA,比逐步 step 快)."""
         # * 一次算多个新 token, 需要手动因果 mask.
@@ -171,7 +194,7 @@ class _Eagle3MidLayer(nn.Module):
         v = self.v_proj(x).view(b, A, self.n_kv_heads, self.head_dim).transpose(1, 2)
         positions = torch.arange(
             start_position, start_position + A, device=x.device, dtype=torch.long
-        )
+        ) + int(rope_delta)
         cos, sin = self._rope_cos_sin(positions, x.device, x.dtype)
         q = _apply_rope(q, cos, sin)
         k = _apply_rope(k, cos, sin)
@@ -317,6 +340,7 @@ class Eagle3SglDraftModel(nn.Module):
             n_kv_heads=n_kv_heads,
             rope_base=rope_base,
             eps=eps,
+            mrope_section=rope_params.get("mrope_section"),
             **fk,
         )
         self.norm = _RMSNorm(hidden, eps=eps, **fk)
@@ -397,6 +421,7 @@ class Eagle3SglDraftModel(nn.Module):
         self,
         prefix_ids: torch.LongTensor,
         target_acts_all: torch.Tensor,
+        position_ids: Optional[torch.Tensor] = None,
     ):
         #! draft model 也需要自己得kv cache
         """对 prompt做 draft prefill。
@@ -433,7 +458,11 @@ class Eagle3SglDraftModel(nn.Module):
             )
         # * torch.Size([1, 21, 12288])-> torch.Size([1, 21, 4096])
         reduced = self.fc(acts.to(embeds.dtype))
-        positions = torch.arange(S, device=embeds.device)  # RoPE 0..S-1
+        if position_ids is not None:
+            # 多模态: position_ids 形状 (3, bs, seq), 第三维取前 S 个(对应 act 0..S-1).
+            positions = position_ids[:, :, :S].to(embeds.device)
+        else:
+            positions = torch.arange(S, device=embeds.device)  # RoPE 0..S-1
         # 整段因果 self-attn,
         # 输出末 hidden + 长度为prefill tokens的 KV(供后续 extend;KV 条数 = prefill token 数)
         h, kv = self.midlayer.prefill(embeds, reduced, positions)
@@ -449,6 +478,7 @@ class Eagle3SglDraftModel(nn.Module):
         target_acts: torch.Tensor,
         past_kv,
         start_position: int,
+        rope_delta: int = 0,
     ):
         """把本轮接受的 token 写入 draft, 并更新 KV 缓存.
 
@@ -457,6 +487,7 @@ class Eagle3SglDraftModel(nn.Module):
         TODO: 注意现在实际错位使用的token使用前一位置feature.
         past_kv: 之前保存的 draft KV.
         start_position: 首个 token 的 RoPE 位置, 等于 p_old - 1,
+        rope_delta: 多模态时的 MRoPE 位置偏移(文本为 0).
 
         返回下一个 token 的 logits, 末位置 hidden 和更新后的 KV.
         """
@@ -470,7 +501,9 @@ class Eagle3SglDraftModel(nn.Module):
         embeds = self.embed(token_ids)
         reduced = self.fc(target_acts.to(embeds.dtype))
         # 批量更新 KV等draft state
-        h, kv = self.midlayer.extend(embeds, reduced, past_kv, int(start_position))
+        h, kv = self.midlayer.extend(
+            embeds, reduced, past_kv, int(start_position), rope_delta=rope_delta
+        )
         last = self.norm(h)[:, -1, :]
         return self._lm_logits(last), h[:, -1, :], kv
 
