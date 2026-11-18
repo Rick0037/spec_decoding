@@ -1,0 +1,27 @@
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=130 rounds=50 tau=2.60 proposed/round=1.86 spec_tpot=226.9ms base_tpot=39.2ms lossless=True
+[02] new=128 rounds=51 tau=2.51 proposed/round=1.84 spec_tpot=236.9ms base_tpot=43.2ms lossless=True
+[03] new=130 rounds=54 tau=2.41 proposed/round=1.78 spec_tpot=234.5ms base_tpot=36.9ms lossless=True
+[04] new=128 rounds=53 tau=2.42 proposed/round=1.77 spec_tpot=226.6ms base_tpot=40.0ms lossless=True
+[05] new=129 rounds=50 tau=2.58 proposed/round=1.82 spec_tpot=103.5ms base_tpot=51.5ms lossless=True
+[06] new=129 rounds=48 tau=2.69 proposed/round=1.85 spec_tpot=104.0ms base_tpot=38.7ms lossless=True
+[07] new=129 rounds=51 tau=2.53 proposed/round=1.82 spec_tpot=129.5ms base_tpot=46.6ms lossless=True
+[08] new=130 rounds=49 tau=2.65 proposed/round=1.86 spec_tpot=118.6ms base_tpot=41.0ms lossless=True
+[09] new=130 rounds=56 tau=2.32 proposed/round=1.71 spec_tpot=312.8ms base_tpot=44.1ms lossless=True
+[10] new=129 rounds=54 tau=2.39 proposed/round=1.76 spec_tpot=328.0ms base_tpot=40.1ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=8 num_steps(depth)=8 max_tree_nodes=64
+total_new_tokens=1292 total_rounds=516
+accepted_tokens=1292 proposed_draft_tokens=932
+tau(accept_length)=2.504 proposed/round=1.806
+spec:   TPOT=202.16ms  throughput=4.95 tok/s  wall=261.19s
+baseline: TPOT=42.12ms  throughput=23.74 tok/s  wall=53.92s
+speedup=0.21x  lossless(all)=True
+=============================================================

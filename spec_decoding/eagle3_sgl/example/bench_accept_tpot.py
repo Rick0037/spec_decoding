@@ -32,7 +32,9 @@ dtype 注意: bf16 只有 7 位尾数, 长序列(>100 token)下 baseline 与 ver
     # 多模态(带图)
     HF_HOME=/root/autodl-tmp/hf_cache HF_HUB_OFFLINE=1 PYTHONPATH=. \
     .venv/bin/python spec_decoding/eagle3_sgl/example/bench_accept_tpot.py \
-        --mode vl --num-prompts 3 --max-new-tokens 128 --explain
+        --mode vl --num-prompts 10 --max-new-tokens 128 --explain
+
+verify 默认走 triton_tree kernel, 需要退回 HF sdpa 时加 --verify-backend eager.
 """
 
 from __future__ import annotations
@@ -63,9 +65,7 @@ MODE_PRESETS = {
 DEFAULT_VL_TSV = "/root/autodl-tmp/LMUData/ChartQA_TEST.tsv"
 
 # 引导长输出的后缀: 短答案数据集必须让模型输出推理过程才测得出接受长度.
-EXPLAIN_SUFFIX = (
-    "\nExplain your reasoning step by step before giving the final answer."
-)
+EXPLAIN_SUFFIX = "\nExplain your reasoning step by step before giving the final answer."
 
 # 固定 10 条 prompt, 覆盖解释/代码/数学/翻译/写作等不同分布.
 FIXED_PROMPTS = [
@@ -106,9 +106,25 @@ class BenchSummary:
         return sum(getattr(result, attribute) for result in self.results)
 
 
-def load_target(target_id: str, device, dtype):
-    """加载 target 模型与 tokenizer, 失败时回退到等价镜像."""
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+def load_target(target_id: str, device, dtype, mode: str):
+    """加载 target 模型与 tokenizer. 文本模式失败时回退到等价镜像, VL 模式不回退."""
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoModelForImageTextToText,
+        AutoProcessor,
+        AutoTokenizer,
+    )
+
+    if mode == "vl":
+        print(f"[bench] loading target {target_id} ...", flush=True)
+        processor = AutoProcessor.from_pretrained(target_id)
+        model = (
+            AutoModelForImageTextToText.from_pretrained(target_id, torch_dtype=dtype)
+            .to(device)
+            .eval()
+        )
+        print(f"[bench] target ready: {target_id}", flush=True)
+        return processor.tokenizer, model, target_id, processor
 
     fallback = "NousResearch/Meta-Llama-3.1-8B-Instruct"
     last_error = None
@@ -122,11 +138,63 @@ def load_target(target_id: str, device, dtype):
                 .eval()
             )
             print(f"[bench] target ready: {model_id}", flush=True)
-            return tokenizer, model, model_id
+            return tokenizer, model, model_id, None
         except Exception as error:
             print(f"[bench] failed to load {model_id}: {error}", flush=True)
             last_error = error
     raise RuntimeError(f"could not load target; last error: {last_error}")
+
+
+def load_vl_samples(tsv_path: str, num_samples: int):
+    """读 VLMEvalKit 格式 tsv 前 num_samples 条, 返回 (question, PIL.Image).
+
+    兼容两种图片存储: image_path 指向真实文件, 或 image 列存 base64.
+    base64 图片很大, 需要提高 csv 字段上限.
+    """
+    import base64
+    import io
+    import os
+    import sys
+
+    from PIL import Image
+
+    csv.field_size_limit(sys.maxsize)
+    samples = []
+    with open(tsv_path, encoding="utf-8") as file:
+        reader = csv.DictReader(file, delimiter="\t")
+        for row in reader:
+            image_path = row.get("image_path") or ""
+            if image_path and os.path.exists(image_path):
+                image = Image.open(image_path).convert("RGB")
+            else:
+                encoded = row.get("image") or ""
+                if not encoded:
+                    continue
+                image = Image.open(io.BytesIO(base64.b64decode(encoded))).convert("RGB")
+            samples.append((row["question"], image))
+            if len(samples) >= num_samples:
+                break
+    return samples
+
+
+def build_vl_input(processor, question: str, image, device) -> tuple:
+    """把图文样本转成 (input_ids, multimodal_inputs)."""
+    messages = [
+        {
+            "role": "user",
+            "content": [{"type": "image"}, {"type": "text", "text": question}],
+        }
+    ]
+    text = processor.apply_chat_template(
+        messages, add_generation_prompt=True, tokenize=False
+    )
+    inputs = processor(text=[text], images=[image], return_tensors="pt").to(device)
+    multimodal_inputs = {
+        "pixel_values": inputs["pixel_values"],
+        "image_grid_thw": inputs["image_grid_thw"],
+        "mm_token_type_ids": inputs["mm_token_type_ids"],
+    }
+    return inputs["input_ids"], multimodal_inputs
 
 
 def build_input_ids(tokenizer, prompt: str, device) -> torch.LongTensor:
@@ -142,7 +210,9 @@ def build_input_ids(tokenizer, prompt: str, device) -> torch.LongTensor:
     return tokenizer(prompt, return_tensors="pt")["input_ids"].to(device)
 
 
-def run_spec_prompt(gen, input_ids, max_new_tokens: int, eos) -> tuple:
+def run_spec_prompt(
+    gen, input_ids, max_new_tokens: int, eos, multimodal_inputs=None
+) -> tuple:
     """跑一条 prompt 的投机解码, 返回 (输出 token 列表, 本轮计数差值, 墙钟)."""
     prompt_length = int(input_ids.shape[1])
     rounds_before = gen.n_rounds
@@ -154,7 +224,10 @@ def run_spec_prompt(gen, input_ids, max_new_tokens: int, eos) -> tuple:
     start = time.perf_counter()
     with torch.inference_mode():
         output_ids = gen.generate(
-            input_ids, max_new_tokens=max_new_tokens, eos_token_id=eos
+            input_ids,
+            max_new_tokens=max_new_tokens,
+            eos_token_id=eos,
+            multimodal_inputs=multimodal_inputs,
         )
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -167,8 +240,13 @@ def run_spec_prompt(gen, input_ids, max_new_tokens: int, eos) -> tuple:
     return new_ids, rounds, accepted, proposed, wall
 
 
-def run_baseline_prompt(target, input_ids, max_new_tokens: int, eos) -> tuple:
-    """跑一条 prompt 的 HF greedy baseline, 返回 (输出 token 列表, 墙钟)."""
+def run_baseline_prompt(
+    target, input_ids, max_new_tokens: int, eos, multimodal_inputs=None
+) -> tuple:
+    """跑一条 prompt 的 HF greedy baseline, 返回 (输出 token 列表, 墙钟).
+
+    带 KV cache 的正常 generate, 与投机解码公平对比 TPOT.
+    """
     prompt_length = int(input_ids.shape[1])
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -181,6 +259,7 @@ def run_baseline_prompt(target, input_ids, max_new_tokens: int, eos) -> tuple:
             num_beams=1,
             use_cache=True,
             pad_token_id=eos,
+            **(multimodal_inputs or {}),
         )
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -191,16 +270,56 @@ def run_baseline_prompt(target, input_ids, max_new_tokens: int, eos) -> tuple:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="EAGLE3 accept-rate + TPOT benchmark")
-    parser.add_argument("--target", default="meta-llama/Llama-3.1-8B-Instruct")
-    parser.add_argument("--eagle3-draft", default="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")
+    parser.add_argument(
+        "--mode",
+        default="text",
+        choices=["text", "vl"],
+        help="一键预设: text=Llama3.1+固定文本 prompt, vl=Qwen3-VL+tsv 图文样本",
+    )
+    parser.add_argument("--target", default=None, help="覆盖预设的 target 模型")
+    parser.add_argument("--eagle3-draft", default=None, help="覆盖预设的 draft 模型")
+    parser.add_argument(
+        "--tsv", default=DEFAULT_VL_TSV, help="vl 模式的图文数据集(VLMEvalKit tsv)"
+    )
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="追加解释推理的要求以拉长输出; 短答案测不出真实接受长度",
+    )
+    parser.add_argument(
+        "--dtype",
+        default="float16",
+        choices=["float16", "bfloat16", "float32"],
+        help="bf16 尾数只有 7 位, 长输出下可能出现 argmax 平局翻转导致假发散",
+    )
     parser.add_argument("--max-new-tokens", type=int, default=64)
     parser.add_argument("--num-prompts", type=int, default=10)
-    parser.add_argument("--topk", type=int, default=8, help="每个父节点展开的子候选数(树的宽度)")
-    parser.add_argument("--num-steps", type=int, default=8, help="draft 树的最大深度(根到叶的层数)")
+    parser.add_argument(
+        "--topk", type=int, default=8, help="每个父节点展开的子候选数(树的宽度)"
+    )
+    parser.add_argument(
+        "--num-steps", type=int, default=8, help="draft 树的最大深度(根到叶的层数)"
+    )
+    parser.add_argument("--verify-backend", default="triton_tree")
+    parser.add_argument(
+        "--verify-mode",
+        default="full_model_tree",
+        choices=["full_model_tree", "reference_paths"],
+        help="reference_paths 用逐路径 causal forward 做对照, 慢但可排除树掩码/位置的嫌疑",
+    )
     command_line_args = parser.parse_args()
 
+    mode = command_line_args.mode
+    preset = MODE_PRESETS[mode]
+    target_id_arg = command_line_args.target or preset["target"]
+    draft_id = command_line_args.eagle3_draft or preset["draft"]
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dtype = torch.float16
+    dtype = {
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+        "float32": torch.float32,
+    }[command_line_args.dtype]
 
     from huggingface_hub import hf_hub_download
 
@@ -210,25 +329,27 @@ def main() -> None:
         build_eagle3_sgl_draft,
     )
 
-    tokenizer, target, target_id = load_target(command_line_args.target, device, dtype)
-    num_hidden_layers = int(target.config.num_hidden_layers)
+    tokenizer, target, target_id, processor = load_target(
+        target_id_arg, device, dtype, mode
+    )
+    # Qwen3-VL 的层数等维度在 text_config 里, 不在顶层 config.
+    text_config = getattr(target.config, "text_config", target.config)
+    num_hidden_layers = int(text_config.num_hidden_layers)
     eos = tokenizer.eos_token_id
 
     # 构造并加载真实 EAGLE3 draft 权重.
-    draft_config_path = hf_hub_download(command_line_args.eagle3_draft, "config.json")
+    draft_config_path = hf_hub_download(draft_id, "config.json")
     draft_vocab_size = int(
         json.load(open(draft_config_path)).get("draft_vocab_size", 32000)
     )
-    draft_weights_path = hf_hub_download(
-        command_line_args.eagle3_draft, "pytorch_model.bin"
-    )
+    draft_weights_path = hf_hub_download(draft_id, preset["draft_weight_file"])
 
     config = Eagle3SglConfig(
         topk=command_line_args.topk,
         num_steps=command_line_args.num_steps,
         max_tree_nodes=64,
-        verify_mode="full_model_tree",
-        verify_attn_backend="auto",
+        verify_mode=command_line_args.verify_mode,
+        verify_attn_backend=command_line_args.verify_backend,
     )
     eagle_layers = config.resolve_eagle_layers(num_hidden_layers)
     draft = build_eagle3_sgl_draft(
@@ -242,30 +363,59 @@ def main() -> None:
     generator = Eagle3SglGenerator(target, config, draft)
     print(f"[bench] target={target_id} eagle_layers={eagle_layers}", flush=True)
 
-    prompts = FIXED_PROMPTS[: command_line_args.num_prompts]
+    # 统一成 (input_ids, multimodal_inputs) 列表, 文本模式的 multimodal_inputs 为 None.
+    samples = []
+    if mode == "vl":
+        for question, image in load_vl_samples(
+            command_line_args.tsv, command_line_args.num_prompts
+        ):
+            prompt_text = question + (
+                EXPLAIN_SUFFIX if command_line_args.explain else ""
+            )
+            samples.append(build_vl_input(processor, prompt_text, image, device))
+    else:
+        for prompt in FIXED_PROMPTS[: command_line_args.num_prompts]:
+            prompt_text = prompt + (EXPLAIN_SUFFIX if command_line_args.explain else "")
+            samples.append((build_input_ids(tokenizer, prompt_text, device), None))
 
     # 预热: 触发 CUDA kernel 编译/autotune, 不计入统计.
-    warmup_ids = build_input_ids(tokenizer, prompts[0], device)
+    warmup_ids, warmup_mm = samples[0]
     with torch.inference_mode():
-        generator.generate(warmup_ids, max_new_tokens=8, eos_token_id=eos)
+        generator.generate(
+            warmup_ids,
+            max_new_tokens=8,
+            eos_token_id=eos,
+            multimodal_inputs=warmup_mm,
+        )
     generator.n_rounds = 0
     generator.n_accepted_tokens = 0
     generator.n_proposed_draft_tokens = 0
     print("[bench] warmup done", flush=True)
 
     summary = BenchSummary()
-    for index, prompt in enumerate(prompts):
-        input_ids = build_input_ids(tokenizer, prompt, device)
-
+    for index, (input_ids, multimodal_inputs) in enumerate(samples):
         spec_ids, rounds, accepted, proposed, spec_wall = run_spec_prompt(
-            generator, input_ids, command_line_args.max_new_tokens, eos
+            generator,
+            input_ids,
+            command_line_args.max_new_tokens,
+            eos,
+            multimodal_inputs,
         )
         baseline_ids, baseline_wall = run_baseline_prompt(
-            target, input_ids, command_line_args.max_new_tokens, eos
+            target,
+            input_ids,
+            command_line_args.max_new_tokens,
+            eos,
+            multimodal_inputs,
         )
 
-        # 逐 token 对比 greedy 无损性(只比共同长度).
+        # 逐 token 对比 greedy 无损性. 只比共同长度, 且遇到 EOS 就截断:
+        # EOS 之后的内容没有语义, 不该判为发散.
         common_length = min(len(spec_ids), len(baseline_ids))
+        for position, token in enumerate(spec_ids[:common_length]):
+            if token == eos:
+                common_length = position
+                break
         lossless = spec_ids[:common_length] == baseline_ids[:common_length]
 
         result = PromptResult(
@@ -289,6 +439,71 @@ def main() -> None:
             f"lossless={lossless}",
             flush=True,
         )
+        if not lossless:
+            # 打印首个分叉位置与两侧文本, 便于区分逻辑 bug 和数值精度导致的 argmax 翻转.
+            for position, (spec_token, base_token) in enumerate(
+                zip(spec_ids[:common_length], baseline_ids[:common_length])
+            ):
+                if spec_token != base_token:
+                    print(
+                        f"     [diverge] at {position}: "
+                        f"spec={spec_token}({tokenizer.decode([spec_token])!r}) "
+                        f"base={base_token}({tokenizer.decode([base_token])!r})",
+                        flush=True,
+                    )
+                    print(
+                        f"     spec text: {tokenizer.decode(spec_ids[:common_length])!r}",
+                        flush=True,
+                    )
+                    print(
+                        f"     base text: {tokenizer.decode(baseline_ids[:common_length])!r}",
+                        flush=True,
+                    )
+                    # 用干净整段 forward 复算分叉点的 logits: top1/top2 差值极小说明是
+                    # argmax 平局被数值噪声翻转, 差值很大才说明 verify 逻辑错位.
+                    diverge_prefix = torch.cat(
+                        [
+                            input_ids,
+                            torch.tensor(
+                                [baseline_ids[:position]],
+                                device=device,
+                                dtype=input_ids.dtype,
+                            ),
+                        ],
+                        dim=1,
+                    )
+                    forward_kwargs = {}
+                    if multimodal_inputs is not None:
+                        mm_token_type_ids = multimodal_inputs["mm_token_type_ids"]
+                        pad_length = diverge_prefix.shape[1] - mm_token_type_ids.shape[1]
+                        forward_kwargs = {
+                            "pixel_values": multimodal_inputs["pixel_values"],
+                            "image_grid_thw": multimodal_inputs["image_grid_thw"],
+                            "mm_token_type_ids": torch.cat(
+                                [
+                                    mm_token_type_ids,
+                                    mm_token_type_ids.new_zeros((1, pad_length)),
+                                ],
+                                dim=1,
+                            ),
+                        }
+                    with torch.inference_mode():
+                        diverge_logits = (
+                            target(diverge_prefix, use_cache=False, **forward_kwargs)
+                            .logits[0, -1]
+                            .float()
+                        )
+                    top_values, top_indices = torch.topk(diverge_logits, 5)
+                    gap = float(top_values[0] - top_values[1])
+                    print(
+                        f"     logits gap(top1-top2)={gap:.6f} top5="
+                        + ", ".join(
+                            f"{int(token)}({tokenizer.decode([int(token)])!r}):{float(value):.4f}"
+                            for value, token in zip(top_values, top_indices)
+                        ),
+                        flush=True,
+                    )
+                    break
 
     # 汇总.
     total_new = summary.total("new_tokens")
@@ -311,7 +526,8 @@ def main() -> None:
     report = [
         "",
         "==================== EAGLE3 accept + TPOT ====================",
-        f"target={target_id} draft={command_line_args.eagle3_draft}",
+        f"mode={mode} dtype={command_line_args.dtype} explain={command_line_args.explain}",
+        f"target={target_id} draft={draft_id}",
         f"num_prompts={len(summary.results)} max_new_tokens={command_line_args.max_new_tokens}",
         f"tree: topk(width)={command_line_args.topk} num_steps(depth)={command_line_args.num_steps} max_tree_nodes=64",
         f"total_new_tokens={total_new} total_rounds={total_rounds}",

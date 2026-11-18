@@ -20,7 +20,7 @@ torch.nn.functional.scaled_dot_product_attention(..., attn_mask=...) 对接。
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Sequence
+from typing import List
 
 import torch
 
@@ -72,18 +72,6 @@ def layout_tree_position_ids(
     return torch.tensor(depths, dtype=torch.long) + int(past_len) + int(rope_delta)
 
 
-def _on_tree_path(parent: Sequence[int], anc: int, desc: int) -> bool:
-    """若 anc 是 desc 的祖先或 anc==desc(沿 parent 指针向上走),返回 True."""
-    k = desc
-    while True:
-        if k == anc:
-            return True
-        if k < 0:
-            break
-        k = parent[k]
-    return False
-
-
 # 用于tree attention verify,attention_bias即表示attention_mask
 def build_tree_cross_attn_bias_with_prefix(
     layout: TreeLayout,
@@ -110,20 +98,26 @@ def build_tree_cross_attn_bias_with_prefix(
         return torch.zeros(0, past_seq_len, device=device, dtype=dtype)
 
     neg = torch.finfo(dtype).min  # * 默认数值
-    bias = torch.full((n, past_seq_len + n), neg, device=device, dtype=dtype)
     # * q -> draft_len, kv -> past + draft_len
     # (Pdb) bias.shape
     # torch.Size([6, 12])
     # ! [n, past_seq_len+n] -> (q, k) 相乘
     # * 每行来看 看之前的 past_seq_len 列都是ok的
+    # TODO by ruixuan 计算复杂度可以优化 -> 已优化: 前缀列整块置 0, 树部分用祖先矩阵一次写入.
+    # 之前在 GPU 上逐元素赋值, 每轮要 L*(past_len+L) 次 CUDA 写; 带图 prompt 长 547 时
+    # 单这一步就要 400ms. 现在先在 CPU 算好整块掩码, 只做一次 H2D 拷贝.
+    bias = torch.full((n, past_seq_len + n), neg, dtype=dtype)
+    bias[:, :past_seq_len] = 0.0
+
+    # * ancestor[i, k] = True 表示节点 k 在根->i 的路径上(含 i 自己).
+    # 沿 parent 指针向上走, 只有 O(L*树深) 次纯 Python 操作, 不碰 GPU.
+    ancestor = torch.eye(n, dtype=torch.bool)
     for i in range(n):
-        for j in range(past_seq_len + n):
-            if j < past_seq_len:
-                bias[i, j] = 0.0
-            else:
-                # TODO by ruixuan 计算复杂度可以优化
-                # * 如果i 看向 j . 再path上就不mask掉
-                k = j - past_seq_len
-                if _on_tree_path(layout.parent, k, i):
-                    bias[i, j] = 0.0
-    return bias
+        k = layout.parent[i]
+        while k >= 0:
+            ancestor[i, k] = True
+            k = layout.parent[k]
+    # * 如果i 看向 j . 再path上就不mask掉
+    tree_part = bias[:, past_seq_len:]
+    tree_part[ancestor] = 0.0
+    return bias.to(device)
