@@ -276,13 +276,22 @@ class Eagle3SglDraftModel(nn.Module):
         """
         super().__init__()
         tm = _unwrap(target)
-        cfg = tm.config
+        # 多模态模型(如 Qwen3-VL)的语言维度在 config.text_config, 纯文本模型直接在 config.
+        cfg = getattr(tm.config, "text_config", tm.config)
         hidden = int(cfg.hidden_size)
         n_heads = int(getattr(cfg, "num_attention_heads", max(1, hidden // 64)))
         n_kv_heads = int(getattr(cfg, "num_key_value_heads", n_heads))
         # * mlp middle dim
         intermediate = int(getattr(cfg, "intermediate_size", 4 * hidden))
-        rope_base = float(getattr(cfg, "rope_theta", 10000.0))
+        # rope_theta 新版放在 rope_parameters/rope_scaling, 旧版是顶层 rope_theta 属性.
+        rope_params = (
+            getattr(cfg, "rope_parameters", None)
+            or getattr(cfg, "rope_scaling", None)
+            or {}
+        )
+        rope_base = float(
+            rope_params.get("rope_theta", getattr(cfg, "rope_theta", 10000.0))
+        )
         eps = float(getattr(cfg, "rms_norm_eps", 1e-6))
         n_acts = len(list(eagle_layers))
         self.n_acts = n_acts

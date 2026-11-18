@@ -52,6 +52,8 @@ def _unwrap(m: Union[PreTrainedModel, nn.Module]) -> PreTrainedModel:
 def _num_hidden_layers(m: Union[PreTrainedModel, nn.Module]) -> int:
     """从 target config 推断 decoder 层数(兼容 num_hidden_layers / n_layer)."""
     cfg = getattr(_unwrap(m), "config", None)
+    # 多模态模型(如 Qwen3-VL)的层数在 config.text_config, 纯文本模型直接在 config.
+    cfg = getattr(cfg, "text_config", cfg)
     for attr in ("num_hidden_layers", "n_layer"):
         v = getattr(cfg, attr, None)
         if v is not None:
