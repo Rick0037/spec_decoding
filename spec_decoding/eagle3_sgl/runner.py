@@ -197,6 +197,8 @@ class Eagle3SglGenerator:
         self.n_accepted_tokens = 0
         # target 选中路径上的 draft 候选 token 总数, 不统计未选中的分支.
         self.n_proposed_draft_tokens = 0
+        # 每轮实际送进 verify 的树节点总数(含未选中分支); verify 成本随这个数涨.
+        self.n_tree_nodes = 0
         # 多模态时的 MRoPE 位置偏移(get_rope_index 的 rope_deltas); 纯文本恒为 0.
         self._rope_delta = 0
 
@@ -251,6 +253,7 @@ class Eagle3SglGenerator:
         device = full_prefix_ids.device
         # ① AR 建树
         layout = self._build_tree(full_prefix_ids, draft_state)
+        self.n_tree_nodes += len(layout)
 
         past_len = int(full_prefix_ids.shape[1])
         # * 找到所有的叶子节点

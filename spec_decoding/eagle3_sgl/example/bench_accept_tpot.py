@@ -90,6 +90,7 @@ class PromptResult:
     rounds: int = 0
     accepted_tokens: int = 0
     proposed_draft_tokens: int = 0
+    tree_nodes: int = 0
     spec_wall: float = 0.0
     baseline_wall: float = 0.0
     baseline_new_tokens: int = 0
@@ -218,6 +219,7 @@ def run_spec_prompt(
     rounds_before = gen.n_rounds
     accepted_before = gen.n_accepted_tokens
     proposed_before = gen.n_proposed_draft_tokens
+    tree_nodes_before = gen.n_tree_nodes
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -237,7 +239,8 @@ def run_spec_prompt(
     rounds = gen.n_rounds - rounds_before
     accepted = gen.n_accepted_tokens - accepted_before
     proposed = gen.n_proposed_draft_tokens - proposed_before
-    return new_ids, rounds, accepted, proposed, wall
+    tree_nodes = gen.n_tree_nodes - tree_nodes_before
+    return new_ids, rounds, accepted, proposed, tree_nodes, wall
 
 
 def run_baseline_prompt(
@@ -396,11 +399,12 @@ def main() -> None:
     generator.n_rounds = 0
     generator.n_accepted_tokens = 0
     generator.n_proposed_draft_tokens = 0
+    generator.n_tree_nodes = 0
     print("[bench] warmup done", flush=True)
 
     summary = BenchSummary()
     for index, (input_ids, multimodal_inputs) in enumerate(samples):
-        spec_ids, rounds, accepted, proposed, spec_wall = run_spec_prompt(
+        spec_ids, rounds, accepted, proposed, tree_nodes, spec_wall = run_spec_prompt(
             generator,
             input_ids,
             command_line_args.max_new_tokens,
@@ -429,6 +433,7 @@ def main() -> None:
             rounds=rounds,
             accepted_tokens=accepted,
             proposed_draft_tokens=proposed,
+            tree_nodes=tree_nodes,
             spec_wall=spec_wall,
             baseline_wall=baseline_wall,
             baseline_new_tokens=len(baseline_ids),
@@ -516,6 +521,7 @@ def main() -> None:
     total_rounds = summary.total("rounds")
     total_accepted = summary.total("accepted_tokens")
     total_proposed = summary.total("proposed_draft_tokens")
+    total_tree_nodes = summary.total("tree_nodes")
     total_spec_wall = summary.total("spec_wall")
     total_baseline_wall = summary.total("baseline_wall")
     total_baseline_new = summary.total("baseline_new_tokens")
@@ -539,6 +545,8 @@ def main() -> None:
         f"total_new_tokens={total_new} total_rounds={total_rounds}",
         f"accepted_tokens={total_accepted} proposed_draft_tokens={total_proposed}",
         f"tau(accept_length)={tau:.3f} proposed/round={proposed_per_round:.3f}",
+        f"tree_nodes/round={total_tree_nodes / max(total_rounds, 1):.2f} (verify 实际算了这么多节点)",
+        f"ms/round={1000.0 * total_spec_wall / max(total_rounds, 1):.2f}",
         f"spec:   TPOT={spec_tpot_ms:.2f}ms  throughput={spec_throughput:.2f} tok/s  wall={total_spec_wall:.2f}s",
         f"baseline: TPOT={baseline_tpot_ms:.2f}ms  throughput={baseline_throughput:.2f} tok/s  wall={total_baseline_wall:.2f}s",
         f"speedup={speedup:.2f}x  lossless(all)={all_lossless}",
