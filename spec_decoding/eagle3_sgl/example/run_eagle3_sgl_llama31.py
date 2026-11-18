@@ -153,6 +153,7 @@ def main() -> None:
     m = min(len(greedy_cont), n_new)
     lossless = greedy_cont[:m] == spec_cont[:m]
     accept_per_round = gen.n_accepted_tokens / max(1, gen.n_rounds)
+    proposed_per_round = gen.n_proposed_draft_tokens / max(1, gen.n_rounds)
 
     # 用 baseline 贪心(逐 token)作为基准时间参照
     if torch.cuda.is_available():
@@ -177,7 +178,8 @@ def main() -> None:
         f"verify=full_model_tree(backend=auto) "
         f"tree=cumulative ar_draft=True inc_acts=True inc_draft_ext=True eagle_layers={eagle_layers} topk=8 num_steps=8 "
         f"max_nodes=64 dtype=float16\n"
-        f"  new_tokens={n_new}  rounds={gen.n_rounds}  accept/round={accept_per_round:.2f}\n"
+        f"  new_tokens={n_new}  rounds={gen.n_rounds}  accept/round={accept_per_round:.2f}  "
+        f"proposed/round={proposed_per_round:.2f}\n"
         f"  wall={dt:.2f}s  spec_tok/s={n_new / dt:.2f}  lossless={lossless}\n"
         f"  baseline(HF greedy) new_tokens={base_new}  wall={base_dt:.2f}s  "
         f"base_tok/s={base_new / base_dt:.2f}  speedup={(n_new/dt)/(base_new/base_dt):.2f}x\n"

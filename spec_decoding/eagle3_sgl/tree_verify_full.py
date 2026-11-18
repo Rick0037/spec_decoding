@@ -106,7 +106,7 @@ def _select_append_root_child(
     parent: List[int],
     token_ids: List[int],
     leaves: List[int],
-) -> List[int]:
+) -> Tuple[List[int], int]:
     """
     第一次 prefill:
     输出 = target(["The", "cat"])
@@ -138,7 +138,9 @@ def _select_append_root_child(
     best_path_nodes = path_node_indices_root_to_leaf(parent, best_leaf)
     best_path_tokens = [token_ids[i] for i in best_path_nodes]
     # ! 接收长度的token + 一个 target的 next new token
-    return best_path_tokens[:best_accepted_len] + [best_next_token]
+    append_list = best_path_tokens[:best_accepted_len] + [best_next_token]
+    # 同时返回选中路径的 draft 候选数, 不统计其他分支.
+    return append_list, len(best_path_nodes)
 
 
 def _match_one_leaf_path(
@@ -180,7 +182,7 @@ def full_tree_verify_extend(
     *,
     leaves: List[int],
     device: torch.device,
-) -> List[int]:
+) -> Tuple[List[int], int]:
     """复用前缀 KV 的 extend 树掩码 verify(HF sdpa + 4D 树 cross mask):只前向 L 个树节点。
 
     临时扩展 cache,取完 logits 后 crop 还原;root 接受用 recovery_logits。无损(与贪心一致)。
@@ -210,7 +212,7 @@ def full_tree_verify_triton(
     *,
     leaves: List[int],
     device: torch.device,
-) -> List[int]:
+) -> Tuple[List[int], int]:
     """extend verify 的 triton 版:
     复用前缀 KV,用 SGLang extend_attention_fwd + 树 custom_mask。
     数值与 full_tree_verify_extend 等价;

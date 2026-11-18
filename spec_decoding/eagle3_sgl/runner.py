@@ -193,6 +193,8 @@ class Eagle3SglGenerator:
         # 诊断计数:投机采样的轮数,采纳 的token 数(accept/round = n_accepted_tokens / n_rounds)
         self.n_rounds = 0
         self.n_accepted_tokens = 0
+        # target 选中路径上的 draft 候选 token 总数, 不统计未选中的分支.
+        self.n_proposed_draft_tokens = 0
 
     def _build_tree(
         self,
@@ -274,7 +276,7 @@ class Eagle3SglGenerator:
 
             # pdb.set_trace()
             # * layout 还没有进行剪枝, 非常大
-            append_list = verify_fn(
+            append_list, proposed_draft_tokens = verify_fn(
                 self.target_m,
                 layout,
                 past_before,  # * 实际 past kv cache的数据结构
@@ -283,6 +285,7 @@ class Eagle3SglGenerator:
                 leaves=leaves,
                 device=device,
             )
+            self.n_proposed_draft_tokens += proposed_draft_tokens
             return torch.tensor([append_list], device=device, dtype=torch.long)
 
         # reference_paths:每条叶路径一次完整 causal forward(串行verify),选 match 最长的叶(慢,易对照)
@@ -298,6 +301,7 @@ class Eagle3SglGenerator:
 
         path = _path_tokens_to_leaf(layout.parent, layout.token_ids, best_leaf)
         append_list = path[:best_m] + [best_next]
+        self.n_proposed_draft_tokens += len(path)
         return torch.tensor([append_list], device=device, dtype=torch.long)
 
     def _prefill_target_and_draft(

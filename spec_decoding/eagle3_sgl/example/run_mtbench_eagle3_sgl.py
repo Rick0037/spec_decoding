@@ -8,7 +8,7 @@ MT-Bench 吞吐评测(对齐公开 EAGLE MT-Bench 基准口径)。
 - 指标:completion tok/s、accept length = total_new_tokens / total_spec_rounds
 - 对比:EAGLE3 speculative vs HF generate(use_cache=True) greedy baseline
 
-跑法(80 题 × max_new_tokens=2048,Docker 内示例;将 <容器名>、<工程根> 换成你的环境)::
+跑法(80 题 * max_new_tokens=2048,Docker 内示例;将 <容器名>、<工程根> 换成你的环境)::
 
     docker exec <容器名> bash -lc '
     cd <工程根> && PYTHONPATH=. python3 -m spec_decoding.eagle3_sgl.example.run_mtbench_eagle3_sgl \\
@@ -20,7 +20,7 @@ MT-Bench 吞吐评测(对齐公开 EAGLE MT-Bench 基准口径)。
     PYTHONPATH=. python3 -m spec_decoding.eagle3_sgl.example.run_mtbench_eagle3_sgl \\
         --num-questions 80 --max-new-tokens 2048
 
-快速 smoke(10 题 × 256)::
+快速 smoke(10 题 * 256)::
 
     PYTHONPATH=. python3 -m spec_decoding.eagle3_sgl.example.run_mtbench_eagle3_sgl \\
         --num-questions 10 --max-new-tokens 256 --skip-baseline
@@ -56,13 +56,16 @@ MTBENCH_SYSTEM = (
 )
 
 
+# *单种生成方式的累计结果. completion_tokens 用于吞吐, spec_rounds 用于平均接受长度.
 @dataclass
 class RunStats:
     completion_tokens: int = 0
     spec_rounds: int = 0
+    proposed_draft_tokens: int = 0
     wall_s: float = 0.0
 
 
+# *speculative 和 baseline 分开统计, 最后用同一口径计算 speedup.
 @dataclass
 class BenchStats:
     spec: RunStats = field(default_factory=RunStats)
@@ -93,6 +96,7 @@ def _load_target(target_id: str, device: torch.device, dtype: torch.dtype):
 
 
 def _ensure_questions(path: Path) -> None:
+    # *题库已存在时直接复用, 只有缺失时才下载.
     if path.is_file():
         return
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -109,6 +113,7 @@ def load_questions(path: Path, num_questions: int) -> List[Dict[str, Any]]:
         for line in fin:
             line = line.strip()
             if line:
+                # *JSONL 每行保存一道题, turns 中包含该题的两轮用户输入.
                 questions.append(json.loads(line))
     return questions[:num_questions]
 
@@ -116,6 +121,7 @@ def load_questions(path: Path, num_questions: int) -> List[Dict[str, Any]]:
 def _chat_input_ids(
     tok, messages: List[Dict[str, str]], device: torch.device
 ) -> torch.LongTensor:
+    # *优先使用模型自带的 chat template, 保证输入格式与训练时一致.
     if getattr(tok, "chat_template", None):
         out = tok.apply_chat_template(
             messages, add_generation_prompt=True, return_tensors="pt"
@@ -142,8 +148,9 @@ def _generate_spec_turn(
 ) -> Tuple[str, int, int, int, float]:
     input_ids = _chat_input_ids(tok, messages, device)
     plen = int(input_ids.shape[1])
+    # *gen 的计数器跨 turn 累计, 用前后差值得到当前 turn 的统计.
     rounds_before = gen.n_rounds
-    accepted_before = gen.n_accepted_tokens
+    proposed_before = gen.n_proposed_draft_tokens
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     t0 = time.perf_counter()
@@ -158,8 +165,8 @@ def _generate_spec_turn(
     text = tok.decode(new_ids, skip_special_tokens=True)
     n_new = len(new_ids)
     n_rounds = gen.n_rounds - rounds_before
-    n_acc = gen.n_accepted_tokens - accepted_before
-    return text, n_new, n_rounds, n_acc, dt
+    n_proposed = gen.n_proposed_draft_tokens - proposed_before
+    return text, n_new, n_rounds, n_proposed, dt
 
 
 def _generate_baseline_turn(
@@ -173,6 +180,7 @@ def _generate_baseline_turn(
 ) -> Tuple[str, int, float]:
     input_ids = _chat_input_ids(tok, messages, device)
     plen = int(input_ids.shape[1])
+    # *baseline 使用相同的对话和生成上限, 计时只覆盖模型 generate.
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     t0 = time.perf_counter()
@@ -213,12 +221,13 @@ def _run_mtbench_conversations(
         turns = q["turns"]
         print(f"[mtbench] question {qi + 1}/{len(questions)} id={qid}", flush=True)
 
+        # *每次调用只跑 spec 或 baseline 中的一种, 但对话构造方式完全相同.
         messages = list(base_messages)
         for ti, user_text in enumerate(turns[:2]):
             messages.append({"role": "user", "content": user_text})
 
             if spec_gen is not None:
-                text, n_new, n_rounds, _n_acc, dt = _generate_spec_turn(
+                text, n_new, n_rounds, n_proposed, dt = _generate_spec_turn(
                     spec_gen,
                     tok,
                     messages,
@@ -228,6 +237,7 @@ def _run_mtbench_conversations(
                 )
                 stats.spec.completion_tokens += n_new
                 stats.spec.spec_rounds += n_rounds
+                stats.spec.proposed_draft_tokens += n_proposed
                 stats.spec.wall_s += dt
                 print(
                     f"  turn {ti + 1} [spec]: new_tokens={n_new} wall={dt:.2f}s",
@@ -251,6 +261,7 @@ def _run_mtbench_conversations(
             else:
                 text = ""
 
+            # *第一轮 assistant 回答会进入第二轮上下文, 不能直接丢掉.
             messages.append({"role": "assistant", "content": text})
 
     return stats
@@ -263,8 +274,13 @@ def _format_report(
     stats: BenchStats,
 ) -> str:
     spec_tps = stats.spec.completion_tokens / max(stats.spec.wall_s, 1e-9)
+    # *平均接受长度 = 总接受 token 数 / 总投机轮数.
     accept_len = stats.spec.completion_tokens / max(stats.spec.spec_rounds, 1)
+    proposed_per_round = stats.spec.proposed_draft_tokens / max(
+        stats.spec.spec_rounds, 1
+    )
     base_tps = stats.baseline.completion_tokens / max(stats.baseline.wall_s, 1e-9)
+    # *speedup 小于 1 表示 speculative 比 baseline 慢.
     speedup = spec_tps / base_tps if stats.baseline.wall_s > 0 else 0.0
 
     lines = [
@@ -276,6 +292,8 @@ def _format_report(
         f"  num_questions={stats.num_questions}  max_new_tokens={args.max_new_tokens}",
         f"  completion_tokens={stats.spec.completion_tokens}  spec_rounds={stats.spec.spec_rounds}  "
         f"accept_length={accept_len:.2f}",
+        f"  proposed_draft_tokens={stats.spec.proposed_draft_tokens}  "
+        f"proposed/round={proposed_per_round:.2f}",
         f"  wall={stats.spec.wall_s:.2f}s  spec_tok/s={spec_tps:.2f}",
     ]
     if stats.baseline.wall_s > 0:
@@ -320,7 +338,7 @@ def main() -> None:
         action="store_true",
         help="只跑 speculative,跳过 HF greedy baseline",
     )
-    p.add_argument("--spec-only", action="store_true", help=argparse.SUPPRESS)  # alias
+    p.add_argument("--spec-only", action="store_true", help=argparse.SUPPRESS)  # *alias
     p.add_argument("--perf-log", type=Path, default=_HERE / "perf-mtbench.log")
     args = p.parse_args()
     if args.spec_only:
@@ -343,6 +361,7 @@ def main() -> None:
         build_eagle3_sgl_draft,
     )
 
+    # *数据和模型加载只做准备, 不计入后面的生成耗时.
     questions = load_questions(args.question_file, args.num_questions)
     print(
         f"[mtbench] loaded {len(questions)} questions from {args.question_file}",
@@ -353,6 +372,7 @@ def main() -> None:
     n_layers = int(target.config.num_hidden_layers)
     eos = tok.eos_token_id
 
+    # *draft 使用独立词表, 词表大小和模型权重都从 checkpoint 获取.
     draft_cfg_path = hf_hub_download(args.eagle3_draft, "config.json")
     draft_vocab_size = int(
         json.load(open(draft_cfg_path)).get("draft_vocab_size", 32000)
@@ -378,6 +398,7 @@ def main() -> None:
     )
     gen = Eagle3SglGenerator(target, cfg, draft)
 
+    # *两种生成方式跑同一套题, baseline 可以通过命令行关闭.
     print("[mtbench] running EAGLE3 ...", flush=True)
     spec_stats = _run_mtbench_conversations(
         tok,
@@ -416,6 +437,7 @@ def main() -> None:
     )
     print("=============================================================")
 
+    # *日志采用追加模式, 方便对比不同代码版本和参数组合.
     args.perf_log.parent.mkdir(parents=True, exist_ok=True)
     with open(args.perf_log, "a", encoding="utf-8") as f:
         f.write(time.strftime("%Y-%m-%d %H:%M:%S\n"))

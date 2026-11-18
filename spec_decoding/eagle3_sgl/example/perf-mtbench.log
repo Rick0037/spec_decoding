@@ -1,0 +1,19 @@
+2026-11-18 15:27:02
+[eagle3_sgl mtbench] 
+target=NousResearch/Meta-Llama-3.1-8B-Instruct 
+draft=yuhuili/EAGLE3-LLaMA3.1-Instruct-8B 
+verify=full_model_tree(backend=auto) 
+ar_draft=True inc_acts=True inc_draft_ext=True eagle_layers=[2, 16, 29] topk=8 num_steps=8 max_nodes=64 dtype=float16
+  num_questions=2  max_new_tokens=128
+  completion_tokens=515  spec_rounds=177  accept_length=2.91
+  wall=48.20s  spec_tok/s=10.68
+  baseline(HF greedy) completion_tokens=512  wall=11.96s  base_tok/s=42.82  speedup=0.25x
+
+2026-11-18 16:01:35
+[eagle3_sgl mtbench] target=NousResearch/Meta-Llama-3.1-8B-Instruct draft=yuhuili/EAGLE3-LLaMA3.1-Instruct-8B verify=full_model_tree(backend=auto) ar_draft=True inc_acts=True inc_draft_ext=True eagle_layers=[2, 16, 29] topk=8 num_steps=8 max_nodes=64 dtype=float16
+  num_questions=2  max_new_tokens=128
+  completion_tokens=515  spec_rounds=177  accept_length=2.91
+  proposed_draft_tokens=349  proposed/round=1.97
+  wall=47.43s  spec_tok/s=10.86
+  baseline(HF greedy) completion_tokens=512  wall=11.47s  base_tok/s=44.63  speedup=0.24x
+

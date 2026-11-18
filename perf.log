@@ -28,3 +28,15 @@
   wall=4.18s  spec_tok/s=19.37  lossless=True
   baseline(HF greedy) new_tokens=80  wall=1.75s  base_tok/s=45.76  speedup=0.42x
 
+2026-11-18 16:46:33
+[eagle3_sgl] target=NousResearch/Meta-Llama-3.1-8B-Instruct draft=yuhuili/EAGLE3-LLaMA3.1-Instruct-8B verify=full_model_tree(backend=auto) tree=cumulative ar_draft=True inc_acts=True inc_draft_ext=True eagle_layers=[2, 16, 29] topk=8 num_steps=8 max_nodes=64 dtype=float16
+  new_tokens=49  rounds=20  accept/round=2.45  proposed/round=1.75
+  wall=136.54s  spec_tok/s=0.36  lossless=True
+  baseline(HF greedy) new_tokens=48  wall=10.49s  base_tok/s=4.57  speedup=0.08x
+
+2026-11-18 16:47:08
+[eagle3_sgl] target=NousResearch/Meta-Llama-3.1-8B-Instruct draft=yuhuili/EAGLE3-LLaMA3.1-Instruct-8B verify=full_model_tree(backend=auto) tree=cumulative ar_draft=True inc_acts=True inc_draft_ext=True eagle_layers=[2, 16, 29] topk=8 num_steps=8 max_nodes=64 dtype=float16
+  new_tokens=49  rounds=20  accept/round=2.45  proposed/round=1.75
+  wall=2.75s  spec_tok/s=17.83  lossless=True
+  baseline(HF greedy) new_tokens=48  wall=1.09s  base_tok/s=44.20  speedup=0.40x
+

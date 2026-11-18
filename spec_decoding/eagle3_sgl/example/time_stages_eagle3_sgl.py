@@ -144,6 +144,7 @@ def main():
         gen.generate(input_ids, max_new_tokens=args.warmup_tokens, eos_token_id=eos)
     gen.n_rounds = 0
     gen.n_accepted_tokens = 0
+    gen.n_proposed_draft_tokens = 0
 
     # 安装分阶段计时(包裹热点 callable)
     T = StageTimer()

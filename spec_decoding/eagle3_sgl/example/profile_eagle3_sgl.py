@@ -184,6 +184,7 @@ def main() -> None:
         gen.generate(input_ids, max_new_tokens=args.warmup_tokens, eos_token_id=eos)
     gen.n_rounds = 0
     gen.n_accepted_tokens = 0
+    gen.n_proposed_draft_tokens = 0
     if torch.cuda.is_available():
         torch.cuda.synchronize()
 
