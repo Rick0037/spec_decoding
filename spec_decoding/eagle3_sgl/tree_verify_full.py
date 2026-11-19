@@ -130,10 +130,17 @@ def _select_append_root_child(
     tree_node_next_token_logits[1]   -> 检查第 2 个 draft token
     tree_node_next_token_logits[2]   -> 检查第 3 个 draft token
     """
+    # * 从之前的 每个路径上都进行D2H 现在变成一次性进行
+    # root 和整棵树分别批量 argmax, 拼接后只做一次 D2H.
+    # target_next_tokens[0] 是 root 预测, target_next_tokens[i+1] 是树节点 i 预测.
+    root_next_token = root_logits.reshape(-1).argmax(dim=-1, keepdim=True)
+    tree_next_tokens = tree_node_next_token_logits.argmax(dim=-1)
+    target_next_tokens = torch.cat([root_next_token, tree_next_tokens]).tolist()
+
     best_accepted_len, best_next_token, best_leaf = -1, 0, 0
     for leaf in leaves:
         accepted_len, next_token = _match_one_leaf_path(
-            tree_node_next_token_logits, root_logits, parent, token_ids, leaf
+            target_next_tokens, parent, token_ids, leaf
         )
         if accepted_len > best_accepted_len:  # 接受数相同时,保留排在前面的路径
             best_accepted_len, best_next_token, best_leaf = (
@@ -151,32 +158,29 @@ def _select_append_root_child(
 
 
 def _match_one_leaf_path(
-    tree_node_next_token_logits: torch.Tensor,
-    root_logits: torch.Tensor,
+    target_next_tokens: List[int],
     parent: List[int],
     token_ids: List[int],
     leaf: int,
 ) -> Tuple[int, int]:
     """对单条根→叶路径逐位 greedy 比对,返回 (接受个数, 下一位 token).
 
-    对齐规则:路径上第 pos 个节点提案的 token,由它父节点的输出 logits 预测——
-    pos=0 没有父(直接挂前缀后),用 root_logits(前缀末位的预测);
-    pos>0 用 tree_node_next_token_logits[父]。首个不一致即停,下一位给 target 的修正;
-    全中则下一位是叶节点自己的 argmax(bonus)。
+    对齐规则:路径上第 pos 个节点提案的 token,由它父节点的预测决定.
+    pos=0 读 target_next_tokens[0], pos>0 读父节点下标+1.
+    首个不一致即停,下一位给 target 的修正;全中则取叶节点预测作为 bonus.
+    这里只读批量取回的 Python list, 不再逐路径执行 argmax 和 item.
     """
     path_nodes = path_node_indices_root_to_leaf(parent, leaf)
     for pos, node_idx in enumerate(path_nodes):
-        #! 预测源:根节点用 root_logits,其余用父节点的输出 logits
-        source_logits = (
-            root_logits
+        #! 预测源:根节点用 root 预测,其余用父节点的预测
+        target_token = (
+            target_next_tokens[0]
             if pos == 0
-            else tree_node_next_token_logits[path_nodes[pos - 1]]
+            else target_next_tokens[path_nodes[pos - 1] + 1]
         )
-        target_token = int(source_logits.argmax(dim=-1).item())
         if target_token != token_ids[node_idx]:
             return pos, target_token  # 接受前 pos 个,第 pos+1 位用 target 修正
-    next_token_logits = tree_node_next_token_logits[path_nodes[-1]]
-    return len(path_nodes), int(next_token_logits.argmax(dim=-1).item())
+    return len(path_nodes), target_next_tokens[path_nodes[-1] + 1]
 
 
 @torch.inference_mode()
