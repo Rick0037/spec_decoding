@@ -150,6 +150,12 @@ def main() -> None:
         default="triton_tree",
         choices=["triton_tree", "eager"],
     )
+    p.add_argument(
+        "--cuda-graph",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="StaticCache + verify CUDA graph 路径",
+    )
     p.add_argument("--device", default="cuda")
     p.add_argument(
         "--dtype", default="float16", choices=["float16", "bfloat16", "float32"]
@@ -199,6 +205,7 @@ def main() -> None:
         num_steps=args.num_steps,
         max_tree_nodes=args.max_tree_nodes,
         draft_tree_mode=args.tree_mode,
+        decode_cuda_graph=args.cuda_graph,
         verify_attn_backend=args.verify_attn_backend,
     )
     eagle_layers = cfg.resolve_eagle_layers(n_layers)
@@ -226,12 +233,14 @@ def main() -> None:
         multimodal_inputs = None
     eos = tok.eos_token_id
 
-    # 预热(含 CUDA graph / kernel autotune / 编译缓存),不计入 profile
+    # 预热(含 CUDA graph / kernel autotune / 编译缓存),不计入 profile.
+    # cuda graph 模式用与计时相同的长度, 避免 profile 段内重新捕获.
+    warmup_tokens = args.max_new_tokens if args.cuda_graph else args.warmup_tokens
     print("[profile] warmup ...", flush=True)
     with torch.inference_mode():
         gen.generate(
             input_ids,
-            max_new_tokens=args.warmup_tokens,
+            max_new_tokens=warmup_tokens,
             eos_token_id=eos,
             multimodal_inputs=multimodal_inputs,
         )
@@ -270,7 +279,7 @@ def main() -> None:
     header = (
         f"\n==================== EAGLE3 torch.profiler ====================\n"
         f"mode={args.mode} target={target_id} draft={draft_id}\n"
-        f"tree_mode={args.tree_mode} verify_backend={args.verify_attn_backend} "
+        f"tree_mode={args.tree_mode} verify_backend={args.verify_attn_backend} cuda_graph={args.cuda_graph} "
         f"topk={args.topk} steps={args.num_steps} nodes={args.max_tree_nodes} dtype={args.dtype}\n"
         f"new_tokens={n_new} rounds={gen.n_rounds} accept/round={accept:.2f} "
         f"wall={wall:.2f}s spec_tok/s={n_new / wall:.2f}"

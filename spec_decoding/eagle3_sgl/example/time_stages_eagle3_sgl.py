@@ -84,6 +84,12 @@ def main():
     p.add_argument(
         "--verify-attn-backend", default="triton_tree", choices=["triton_tree", "eager"]
     )
+    p.add_argument(
+        "--cuda-graph",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="StaticCache + verify CUDA graph 路径",
+    )
     p.add_argument("--dtype", default="float16")
     p.add_argument("--report-out", default="")
     args = p.parse_args()
@@ -119,6 +125,7 @@ def main():
         num_steps=args.num_steps,
         max_tree_nodes=args.max_tree_nodes,
         draft_tree_mode=args.tree_mode,
+        decode_cuda_graph=args.cuda_graph,
         verify_attn_backend=args.verify_attn_backend,
     )
     eagle_layers = cfg.resolve_eagle_layers(n_layers)
@@ -144,11 +151,12 @@ def main():
         multimodal_inputs = None
     eos = tok.eos_token_id
 
-    # warmup
+    # warmup. cuda graph 模式用与计时相同的长度, 避免计时段内重新捕获.
+    warmup_tokens = args.max_new_tokens if args.cuda_graph else args.warmup_tokens
     with torch.inference_mode():
         gen.generate(
             input_ids,
-            max_new_tokens=args.warmup_tokens,
+            max_new_tokens=warmup_tokens,
             eos_token_id=eos,
             multimodal_inputs=multimodal_inputs,
         )
@@ -200,6 +208,20 @@ def main():
     TVF._select_append_root_child = T.wrap(
         "verify_select", TVF._select_append_root_child
     )
+    if args.cuda_graph:
+        # graph 路径的 verify 走 StaticGraphCommitVerifier.verify_commit,
+        # 不经过 R.full_tree_verify_*; warmup 已完成捕获, patch 在其后, 安全.
+        import spec_decoding.eagle3_sgl.target_graph as TG
+
+        TG.StaticGraphCommitVerifier.verify_commit = verify_mark(
+            "target_verify", TG.StaticGraphCommitVerifier.verify_commit
+        )
+        TG._select_append_root_child = T.wrap(
+            "verify_select", TG._select_append_root_child
+        )
+        TG.commit_accepted_static_kv = T.wrap(
+            "verify_commit", TG.commit_accepted_static_kv
+        )
 
     def tf_wrap(*a, **k):
         if state["first"]:
@@ -247,13 +269,14 @@ def main():
         "verify_meta",
         "verify_forward",
         "verify_select",
+        "verify_commit",
         "target_replay",
         "draft_extend",
     ]
     measured = sum(T.total[k] for k in order)
     lines = [
         "\n==================== EAGLE3 分阶段墙钟(父阶段已扣除子阶段)====================",
-        f"mode={args.mode} tree_mode={args.tree_mode} target={target_id} draft={draft_id}",
+        f"mode={args.mode} tree_mode={args.tree_mode} cuda_graph={args.cuda_graph} target={target_id} draft={draft_id}",
         f"new_tokens={n_new} rounds={gen.n_rounds} accept/round={accept:.2f} wall={wall:.2f}s spec_tok/s={n_new / wall:.2f}",
         f"{'stage':<24}{'calls':>8}{'total_ms':>12}{'%measured':>11}{'%wall':>9}{'ms/call':>10}",
     ]
