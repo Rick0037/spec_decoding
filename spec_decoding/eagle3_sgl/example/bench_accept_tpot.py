@@ -310,7 +310,13 @@ def main() -> None:
         "--max-tree-nodes",
         type=int,
         default=64,
-        help="draft 节点总预算(BFS 硬截断); 预算不够时 num_steps 调大也长不到那个深度",
+        help="verify 节点预算; BFS 按创建顺序截断, EAGLE2 展开后按累计分数剪枝",
+    )
+    parser.add_argument(
+        "--tree-mode",
+        default="eagle2_batch",
+        choices=["eagle2", "eagle2_batch", "bfs"],
+        help="eagle2=逐节点 beam, eagle2_batch=按层 batch beam, bfs=原 BFS",
     )
     parser.add_argument("--verify-backend", default="triton_tree")
     parser.add_argument(
@@ -360,6 +366,7 @@ def main() -> None:
         topk=command_line_args.topk,
         num_steps=command_line_args.num_steps,
         max_tree_nodes=command_line_args.max_tree_nodes,
+        draft_tree_mode=command_line_args.tree_mode,
         verify_mode=command_line_args.verify_mode,
         verify_attn_backend=command_line_args.verify_backend,
     )
@@ -555,7 +562,7 @@ def main() -> None:
         f"mode={mode} dtype={command_line_args.dtype} explain={command_line_args.explain}",
         f"target={target_id} draft={draft_id}",
         f"num_prompts={len(summary.results)} max_new_tokens={command_line_args.max_new_tokens}",
-        f"tree: topk(width)={command_line_args.topk} num_steps(depth)={command_line_args.num_steps} max_tree_nodes={command_line_args.max_tree_nodes}",
+        f"tree: mode={command_line_args.tree_mode} topk(width)={command_line_args.topk} num_steps(depth)={command_line_args.num_steps} max_tree_nodes={command_line_args.max_tree_nodes}",
         f"total_new_tokens={total_new} total_rounds={total_rounds}",
         f"accepted_tokens={total_accepted} proposed_draft_tokens={total_proposed}",
         f"tau(accept_length)={tau:.3f} proposed/round={proposed_per_round:.3f}",

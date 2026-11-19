@@ -256,6 +256,10 @@ EAGLE2 风格可以改为：
 
 结论：值得优先实验，预期比单纯继续加宽更合理，但不能预先保证端到端加速。
 
+实现状态：已在 `tree_draft.py` 加入 `draft_tree_mode=eagle2/eagle2_batch/bfs`，默认使用 `eagle2_batch`，逐节点 EAGLE2 和 BFS 保留为对照组。实现保留了每个 frontier 节点的 AR hidden/KV，并用完整 draft 词表的 logsumexp 计算真实 log 概率。最终剪枝严格保证节点数不超过 max_tree_nodes 且 parent 链完整。合成测试已验证同预算下可以形成更深树，真实权重的 lossless 和速度仍需 A/B 确认。
+
+随后新增 `eagle2_batch` 实验路径：每层 frontier 只做一次 batch draft forward，在 GPU 上完成累计分数和全局 beam topk，再用 index_select 重排 AR hidden/KV，整棵树结束后统一 D2H。合成测试中 serial 与 batch 得到相同 TreeLayout；topk=2、num_steps=4 时，serial 为 6 次单节点 forward，batch 降为 3 次 batch=2 forward。真实 VL 上仍需比较 bfs、eagle2、eagle2_batch 三组，批量版不预设必然更快。
+
 ### 6.2 draft 预消费 target 已确定的 token 与末位 feature
 
 #### 方案

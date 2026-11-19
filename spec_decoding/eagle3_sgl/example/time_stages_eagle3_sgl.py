@@ -78,6 +78,9 @@ def main():
     p.add_argument("--topk", type=int, default=8)
     p.add_argument("--num-steps", type=int, default=8)
     p.add_argument("--max-tree-nodes", type=int, default=64)
+    p.add_argument(
+        "--tree-mode", default="eagle2_batch", choices=["eagle2", "eagle2_batch", "bfs"]
+    )
     p.add_argument("--verify-mode", default="full_model_tree")
     p.add_argument("--verify-attn-backend", default="triton_tree")
     p.add_argument("--dtype", default="float16")
@@ -114,6 +117,7 @@ def main():
         topk=args.topk,
         num_steps=args.num_steps,
         max_tree_nodes=args.max_tree_nodes,
+        draft_tree_mode=args.tree_mode,
         verify_mode=args.verify_mode,
         verify_attn_backend=args.verify_attn_backend,
     )
@@ -249,7 +253,7 @@ def main():
     measured = sum(T.total[k] for k in order)
     lines = [
         "\n==================== EAGLE3 分阶段墙钟(父阶段已扣除子阶段)====================",
-        f"mode={args.mode} target={target_id} draft={draft_id}",
+        f"mode={args.mode} tree_mode={args.tree_mode} target={target_id} draft={draft_id}",
         f"new_tokens={n_new} rounds={gen.n_rounds} accept/round={accept:.2f} wall={wall:.2f}s spec_tok/s={n_new / wall:.2f}",
         f"{'stage':<24}{'calls':>8}{'total_ms':>12}{'%measured':>11}{'%wall':>9}{'ms/call':>10}",
     ]

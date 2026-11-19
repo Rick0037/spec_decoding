@@ -27,7 +27,9 @@ class Eagle3SglConfig:
     num_steps: int = 8
     """从根出发的 draft 深度。"""
     max_tree_nodes: int = 64
-    """draft 节点上限(按 BFS 顺序截断)。"""
+    """verify 节点预算. BFS 按创建顺序截断, EAGLE2 按累计分数剪枝。"""
+    draft_tree_mode: str = "eagle2_batch"
+    """draft 建树策略: eagle2=逐节点 beam, eagle2_batch=按层 batch beam, bfs=原 BFS。"""
     eagle_layers: Optional[List[int]] = None
     """作为 draft 条件的 target 多层 hidden 下标;None 时用 default_eagle_layers。"""
     verify_mode: str = "full_model_tree"
@@ -51,6 +53,10 @@ class Eagle3SglConfig:
             raise ValueError("topk must be >= 1")
         if self.num_steps < 1:
             raise ValueError("num_steps must be >= 1")
+        if self.max_tree_nodes < 1:
+            raise ValueError("max_tree_nodes must be >= 1")
+        if self.draft_tree_mode not in ("eagle2", "eagle2_batch", "bfs"):
+            raise ValueError("draft_tree_mode must be eagle2, eagle2_batch, or bfs")
         if self.verify_mode not in (
             "full_model_tree",
             "reference_paths",
