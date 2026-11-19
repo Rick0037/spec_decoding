@@ -32,7 +32,7 @@ class Eagle3SglConfig:
     """draft 建树策略: eagle2=逐节点 beam, eagle2_batch=按层 batch beam, bfs=原 BFS。"""
     preconsume_first_token: bool = True
     """draft prefill 预消费 target 已确定的首个 token + 末位 feature; 建树时它作为确定根节点."""
-    skip_replay: bool = False
+    skip_replay: bool = True
     """verify 顺带提交接受路径的 KV 和 feature, 省掉每轮 target replay; 仅支持 full_model_tree."""
     eagle_layers: Optional[List[int]] = None
     """作为 draft 条件的 target 多层 hidden 下标;None 时用 default_eagle_layers。"""
@@ -66,8 +66,9 @@ class Eagle3SglConfig:
             "reference_paths",
         ):
             raise ValueError("verify_mode must be full_model_tree or reference_paths")
-        if self.skip_replay and self.verify_mode != "full_model_tree":
-            raise ValueError("skip_replay requires verify_mode=full_model_tree")
+        if self.verify_mode != "full_model_tree":
+            # reference_paths 是对照模式, 没有 commit 实现, 自动回退 replay 路径.
+            self.skip_replay = False
         if self.verify_attn_backend not in (
             "auto",
             "eager",

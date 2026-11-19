@@ -327,8 +327,8 @@ def main() -> None:
     parser.add_argument(
         "--skip-replay",
         action=argparse.BooleanOptionalAction,
-        default=False,
-        help="verify 顺带提交接受路径 KV/feature, 省掉每轮 target replay forward",
+        default=True,
+        help="verify 顺带提交接受路径 KV/feature, 省掉每轮 target replay forward; --no-skip-replay 回退对照",
     )
     parser.add_argument("--verify-backend", default="triton_tree")
     parser.add_argument(

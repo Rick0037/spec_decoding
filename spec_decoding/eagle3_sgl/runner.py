@@ -470,8 +470,7 @@ class Eagle3SglGenerator:
                     int(past.get_seq_length()) + append_length,
                     device=append.device,
                     dtype=torch.long,
-                )
-                .view(1, 1, -1)
+                ).view(1, 1, -1)
                 + self._rope_delta
             )
         with _prof("stage:target_replay"):
@@ -578,9 +577,7 @@ class Eagle3SglGenerator:
             recovery_logits,
             acts_all,
             draft_state,
-        ) = self._prefill_target_and_draft(
-            out_ids, multimodal_inputs=multimodal_inputs
-        )
+        ) = self._prefill_target_and_draft(out_ids, multimodal_inputs=multimodal_inputs)
 
         while num_new_tokens < max_new_tokens:
             if eos_token_id is not None and out_ids[0, -1].item() == eos_token_id:
