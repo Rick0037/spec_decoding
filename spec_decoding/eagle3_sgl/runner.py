@@ -22,6 +22,8 @@ verify_mode=reference_paths:逐叶干净前向,实现简单、便于对照。
 
 from __future__ import annotations
 
+import contextlib
+import os
 from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple, Union
 
@@ -38,6 +40,16 @@ from .tree_verify_full import (
     full_tree_verify_extend,
     full_tree_verify_triton,
 )
+
+
+# 只有诊断脚本显式打开环境变量时才打 stage 标签, 正常 bench 保持零插桩.
+_PROFILE = os.environ.get("EAGLE3_SGL_PROFILE", "0") == "1"
+
+
+def _prof(name: str):
+    if _PROFILE:
+        return torch.profiler.record_function(name)
+    return contextlib.nullcontext()
 
 
 def _unwrap(m: Union[PreTrainedModel, nn.Module]) -> PreTrainedModel:
@@ -252,7 +264,8 @@ class Eagle3SglGenerator:
         """
         device = full_prefix_ids.device
         # ① AR 建树
-        layout = self._build_tree(full_prefix_ids, draft_state)
+        with _prof("stage:draft_build_tree"):
+            layout = self._build_tree(full_prefix_ids, draft_state)
         self.n_tree_nodes += len(layout)
 
         past_len = int(full_prefix_ids.shape[1])
@@ -284,16 +297,17 @@ class Eagle3SglGenerator:
 
             # pdb.set_trace()
             # * layout 还没有进行剪枝, 非常大
-            append_list, proposed_draft_tokens = verify_fn(
-                self.target_m,
-                layout,
-                past_before,  # * 实际 past kv cache的数据结构
-                past_len,
-                recovery_logits,
-                leaves=leaves,
-                device=device,
-                rope_delta=self._rope_delta,
-            )
+            with _prof("stage:target_verify"):
+                append_list, proposed_draft_tokens = verify_fn(
+                    self.target_m,
+                    layout,
+                    past_before,  # * 实际 past kv cache的数据结构
+                    past_len,
+                    recovery_logits,
+                    leaves=leaves,
+                    device=device,
+                    rope_delta=self._rope_delta,
+                )
             self.n_proposed_draft_tokens += proposed_draft_tokens
             return torch.tensor([append_list], device=device, dtype=torch.long)
 
@@ -303,7 +317,10 @@ class Eagle3SglGenerator:
         best_leaf = 0
         for leaf in leaves:
             path = _path_tokens_to_leaf(layout.parent, layout.token_ids, leaf)
-            mlen, nxt = _verify_path_clean(self.target_m, full_prefix_ids, path, device)
+            with _prof("stage:target_verify"):
+                mlen, nxt = _verify_path_clean(
+                    self.target_m, full_prefix_ids, path, device
+                )
             # 接受数相同时保留排在前面的路径(与 extend verify 一致)
             if mlen > best_m:
                 best_m, best_next, best_leaf = mlen, nxt, leaf
@@ -336,22 +353,24 @@ class Eagle3SglGenerator:
             )
             self._rope_delta = int(rope_deltas.flatten()[0].item())
             draft_position_ids = position_ids
-            prefill_outputs = self.target_m(
-                input_ids,
-                attention_mask=prefill_attention_mask,
-                position_ids=position_ids,
-                use_cache=True,
-                output_hidden_states=True,
-                **multimodal_inputs,
-            )
+            with _prof("stage:target_prefill"):
+                prefill_outputs = self.target_m(
+                    input_ids,
+                    attention_mask=prefill_attention_mask,
+                    position_ids=position_ids,
+                    use_cache=True,
+                    output_hidden_states=True,
+                    **multimodal_inputs,
+                )
         else:
             self._rope_delta = 0
-            prefill_outputs = self.target_m(
-                input_ids,
-                attention_mask=prefill_attention_mask,
-                use_cache=True,
-                output_hidden_states=True,
-            )
+            with _prof("stage:target_prefill"):
+                prefill_outputs = self.target_m(
+                    input_ids,
+                    attention_mask=prefill_attention_mask,
+                    use_cache=True,
+                    output_hidden_states=True,
+                )
         past = prefill_outputs.past_key_values
         # * recovery_logits.shape -> [vob_size]
         recovery_logits = prefill_outputs.logits[0, -1]
@@ -366,9 +385,10 @@ class Eagle3SglGenerator:
         # * draft_logits 跟target 一样得token
         # * draft_hidden 上面这个token得hidden size
         # * draft_kv 仅仅有 prompt
-        draft_logits, draft_hidden, draft_kv = self.draft_model.prefill(
-            input_ids, acts_all, position_ids=draft_position_ids
-        )
+        with _prof("stage:draft_prefill_init"):
+            draft_logits, draft_hidden, draft_kv = self.draft_model.prefill(
+                input_ids, acts_all, position_ids=draft_position_ids
+            )
         # * prefill得初始状态
         draft_state = _DraftKvState(
             kv=draft_kv,
@@ -411,14 +431,15 @@ class Eagle3SglGenerator:
                 .view(1, 1, -1)
                 + self._rope_delta
             )
-        accepted_target_outputs = self.target_m(
-            append,
-            past_key_values=past,
-            use_cache=True,
-            attention_mask=accepted_attention_mask,
-            output_hidden_states=True,
-            **forward_kwargs,
-        )
+        with _prof("stage:target_replay"):
+            accepted_target_outputs = self.target_m(
+                append,
+                past_key_values=past,
+                use_cache=True,
+                attention_mask=accepted_attention_mask,
+                output_hidden_states=True,
+                **forward_kwargs,
+            )
         past = accepted_target_outputs.past_key_values
         recovery_logits = accepted_target_outputs.logits[0, -1]
         # * 只计算本轮新增加的 hidden states
@@ -455,13 +476,14 @@ class Eagle3SglGenerator:
         但里面使用的是未被 target 校正的预测 hidden, 直接提交可能累积误差.
         所以这里选择对接受 token 重新计算.
         """
-        draft_logits, draft_hidden, draft_kv = self.draft_model.extend_tokens(
-            append,
-            draft_input_features,
-            draft_state.kv,
-            old_prefix_length - 1,
-            rope_delta=self._rope_delta,
-        )
+        with _prof("stage:draft_extend"):
+            draft_logits, draft_hidden, draft_kv = self.draft_model.extend_tokens(
+                append,
+                draft_input_features,
+                draft_state.kv,
+                old_prefix_length - 1,
+                rope_delta=self._rope_delta,
+            )
         return _DraftKvState(
             kv=draft_kv,
             prefix_len=new_prefix_length,

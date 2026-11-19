@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """
-无 profiler 干扰的分阶段真实墙钟测量:用 CUDA event + synchronize 给每个阶段计时,
+无 profiler 干扰的分阶段真实墙钟测量:用 synchronize + perf_counter 给每个阶段计时,
 回答哪个阶段最耗时。配合 profile_eagle3_sgl.py 的算子表(哪些 op 多余)一起看。
 
 阶段:target_prefill / draft_prefill_init / draft_build_tree / target_verify /
-      target_replay / draft_extend。
+      verify_meta / verify_forward / verify_select / target_replay / draft_extend。
+支持 text / vl 两种预设。此处有逐阶段同步开销, 只用于定位; 正式 HF 对比用 bench。
 
 跑法(Docker 容器内示例;将 <工程根> 换成挂载到容器内的仓库根)::
 
@@ -22,22 +23,16 @@ from collections import defaultdict
 
 import torch
 
-
-def _load_target(target_id, device, dtype):
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
-    for mid in [target_id, "NousResearch/Meta-Llama-3.1-8B-Instruct"]:
-        try:
-            tok = AutoTokenizer.from_pretrained(mid)
-            model = (
-                AutoModelForCausalLM.from_pretrained(mid, torch_dtype=dtype)
-                .to(device)
-                .eval()
-            )
-            return tok, model, mid
-        except Exception as e:
-            print(f"[time] failed {mid}: {e}", flush=True)
-    raise RuntimeError("could not load target")
+from spec_decoding.eagle3_sgl.example.bench_accept_tpot import (
+    DEFAULT_VL_TSV,
+    EXPLAIN_SUFFIX,
+    FIXED_PROMPTS,
+    MODE_PRESETS,
+    build_input_ids,
+    build_vl_input,
+    load_target,
+    load_vl_samples,
+)
 
 
 class StageTimer:
@@ -72,18 +67,19 @@ class StageTimer:
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--target", default="meta-llama/Llama-3.1-8B-Instruct")
-    p.add_argument("--eagle3-draft", default="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")
-    p.add_argument(
-        "--prompt", default="Explain what speculative decoding is, in two sentences."
-    )
+    p.add_argument("--mode", default="text", choices=["text", "vl"])
+    p.add_argument("--target", default=None)
+    p.add_argument("--eagle3-draft", default=None)
+    p.add_argument("--tsv", default=DEFAULT_VL_TSV)
+    p.add_argument("--explain", action="store_true")
+    p.add_argument("--prompt", default=FIXED_PROMPTS[0])
     p.add_argument("--max-new-tokens", type=int, default=128)
     p.add_argument("--warmup-tokens", type=int, default=32)
     p.add_argument("--topk", type=int, default=8)
     p.add_argument("--num-steps", type=int, default=8)
     p.add_argument("--max-tree-nodes", type=int, default=64)
     p.add_argument("--verify-mode", default="full_model_tree")
-    p.add_argument("--verify-attn-backend", default="auto")
+    p.add_argument("--verify-attn-backend", default="triton_tree")
     p.add_argument("--dtype", default="float16")
     p.add_argument("--report-out", default="")
     args = p.parse_args()
@@ -104,10 +100,16 @@ def main():
     )
     import spec_decoding.eagle3_sgl.runner as R
 
-    tok, target, target_id = _load_target(args.target, device, dtype)
-    n_layers = int(target.config.num_hidden_layers)
-    draft_cfg = json.load(open(hf_hub_download(args.eagle3_draft, "config.json")))
-    draft_bin = hf_hub_download(args.eagle3_draft, "pytorch_model.bin")
+    preset = MODE_PRESETS[args.mode]
+    target_id_arg = args.target or preset["target"]
+    draft_id = args.eagle3_draft or preset["draft"]
+    tok, target, target_id, processor = load_target(
+        target_id_arg, device, dtype, args.mode
+    )
+    text_config = getattr(target.config, "text_config", target.config)
+    n_layers = int(text_config.num_hidden_layers)
+    draft_cfg = json.load(open(hf_hub_download(draft_id, "config.json")))
+    draft_bin = hf_hub_download(draft_id, preset["draft_weight_file"])
     cfg = Eagle3SglConfig(
         topk=args.topk,
         num_steps=args.num_steps,
@@ -126,25 +128,30 @@ def main():
     )
     gen = Eagle3SglGenerator(target, cfg, draft)
 
-    out = tok.apply_chat_template(
-        [{"role": "user", "content": args.prompt}],
-        add_generation_prompt=True,
-        return_tensors="pt",
-    )
-    ids = (
-        out.input_ids
-        if hasattr(out, "input_ids")
-        else (out["input_ids"] if isinstance(out, dict) else out)
-    )
-    input_ids = ids.to(device)
+    if args.mode == "vl":
+        question, image = load_vl_samples(args.tsv, 1)[0]
+        prompt = question + (EXPLAIN_SUFFIX if args.explain else "")
+        input_ids, multimodal_inputs = build_vl_input(
+            processor, prompt, image, device
+        )
+    else:
+        prompt = args.prompt + (EXPLAIN_SUFFIX if args.explain else "")
+        input_ids = build_input_ids(tok, prompt, device)
+        multimodal_inputs = None
     eos = tok.eos_token_id
 
     # warmup
     with torch.inference_mode():
-        gen.generate(input_ids, max_new_tokens=args.warmup_tokens, eos_token_id=eos)
+        gen.generate(
+            input_ids,
+            max_new_tokens=args.warmup_tokens,
+            eos_token_id=eos,
+            multimodal_inputs=multimodal_inputs,
+        )
     gen.n_rounds = 0
     gen.n_accepted_tokens = 0
     gen.n_proposed_draft_tokens = 0
+    gen.n_tree_nodes = 0
 
     # 安装分阶段计时(包裹热点 callable)
     T = StageTimer()
@@ -179,6 +186,16 @@ def main():
     R.full_tree_verify_triton = verify_mark(
         "target_verify", TVF.full_tree_verify_triton
     )
+    # 子阶段由 StageTimer 的栈从 target_verify 中扣除, 不会重复计数.
+    TVF.build_triton_tree_verify_metadata = T.wrap(
+        "verify_meta", TVF.build_triton_tree_verify_metadata
+    )
+    TVF._forward_target_tree_and_restore_cache = T.wrap(
+        "verify_forward", TVF._forward_target_tree_and_restore_cache
+    )
+    TVF._select_append_root_child = T.wrap(
+        "verify_select", TVF._select_append_root_child
+    )
 
     def tf_wrap(*a, **k):
         if state["first"]:
@@ -206,7 +223,10 @@ def main():
     t0 = time.perf_counter()
     with torch.inference_mode():
         out_ids = gen.generate(
-            input_ids, max_new_tokens=args.max_new_tokens, eos_token_id=eos
+            input_ids,
+            max_new_tokens=args.max_new_tokens,
+            eos_token_id=eos,
+            multimodal_inputs=multimodal_inputs,
         )
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -220,12 +240,16 @@ def main():
         "draft_prefill_init",
         "draft_build_tree",
         "target_verify",
+        "verify_meta",
+        "verify_forward",
+        "verify_select",
         "target_replay",
         "draft_extend",
     ]
     measured = sum(T.total[k] for k in order)
     lines = [
-        "\n==================== EAGLE3 分阶段墙钟(CUDA event 同步计时)====================",
+        "\n==================== EAGLE3 分阶段墙钟(父阶段已扣除子阶段)====================",
+        f"mode={args.mode} target={target_id} draft={draft_id}",
         f"new_tokens={n_new} rounds={gen.n_rounds} accept/round={accept:.2f} wall={wall:.2f}s spec_tok/s={n_new / wall:.2f}",
         f"{'stage':<24}{'calls':>8}{'total_ms':>12}{'%measured':>11}{'%wall':>9}{'ms/call':>10}",
     ]

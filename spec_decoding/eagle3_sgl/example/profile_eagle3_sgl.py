@@ -10,7 +10,8 @@ torch.profiler 剖析 EAGLE3:定位单步投机里最耗时 / 多余的操作。
   3) Top CPU 算子 / 同步点(aten::item / cuda*Synchronize / copy_ / repeat_interleave 等)——
      看哪些是调度 / 同步 / 多余 H2D-D2H开销。
 
-必须在 import 包前设置 EAGLE3_PROFILE=1(若 runner 启用了分阶段 profiling 开关)。
+必须在 import 包前设置 EAGLE3_SGL_PROFILE=1。支持 text / vl 两种预设;
+本脚本只用于诊断, 正式 HF 速度对比请运行不带插桩的 bench_accept_tpot.py。
 
 跑法(Docker 容器内示例;将 <工程根> 换成挂载到容器内的仓库根)::
 
@@ -28,29 +29,18 @@ import argparse
 import json
 import os
 
-os.environ.setdefault("EAGLE3_PROFILE", "1")  # 必须在 import runner 前(若 runner 支持)
+os.environ.setdefault("EAGLE3_SGL_PROFILE", "1")  # 必须在 import runner 前
 
-
-def _load_target(target_id: str, device, dtype):
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
-    fallback = "NousResearch/Meta-Llama-3.1-8B-Instruct"
-    last_err = None
-    for mid in [target_id, fallback]:
-        try:
-            print(f"[profile] loading target {mid} ...", flush=True)
-            tok = AutoTokenizer.from_pretrained(mid)
-            model = (
-                AutoModelForCausalLM.from_pretrained(mid, torch_dtype=dtype)
-                .to(device)
-                .eval()
-            )
-            print(f"[profile] target ready: {mid}", flush=True)
-            return tok, model, mid
-        except Exception as e:
-            print(f"[profile] failed to load {mid}: {e}", flush=True)
-            last_err = e
-    raise RuntimeError(f"could not load target; last error: {last_err}")
+from spec_decoding.eagle3_sgl.example.bench_accept_tpot import (
+    DEFAULT_VL_TSV,
+    EXPLAIN_SUFFIX,
+    FIXED_PROMPTS,
+    MODE_PRESETS,
+    build_input_ids,
+    build_vl_input,
+    load_target,
+    load_vl_samples,
+)
 
 
 def _stage_table(prof) -> str:
@@ -78,13 +68,53 @@ def _stage_table(prof) -> str:
     return "\n".join(out)
 
 
+def _counts_table(prof) -> str:
+    """统计调度, 同步和拷贝事件, 用来判断是不是 CPU / launch bound."""
+    wanted_events = [
+        "cudaStreamSynchronize",
+        "cudaMemcpyAsync",
+        "Memcpy HtoD",
+        "Memcpy DtoH",
+        "aten::copy_",
+        "aten::item",
+        "aten::_local_scalar_dense",
+        "aten::cat",
+        "cudaLaunchKernel",
+    ]
+    aggregated = {}
+    for event in prof.key_averages():
+        for wanted in wanted_events:
+            if wanted.lower() in event.key.lower():
+                cpu_time = float(getattr(event, "cpu_time_total", 0) or 0)
+                cuda_time = float(getattr(event, "self_cuda_time_total", 0) or 0)
+                count, old_cpu, old_cuda = aggregated.get(wanted, (0, 0.0, 0.0))
+                aggregated[wanted] = (
+                    count + event.count,
+                    old_cpu + cpu_time,
+                    old_cuda + cuda_time,
+                )
+                break
+    lines = [
+        "\n================= 关键事件计数(调度 / 同步 / 拷贝)=================",
+        f"{'event':<28}{'count':>12}{'cpu_ms':>12}{'cuda_ms':>12}",
+    ]
+    for wanted in wanted_events:
+        if wanted in aggregated:
+            count, cpu_time, cuda_time = aggregated[wanted]
+            lines.append(
+                f"{wanted:<28}{count:>12}{cpu_time / 1e3:>12.1f}{cuda_time / 1e3:>12.1f}"
+            )
+    return "\n".join(lines)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="torch.profiler for EAGLE3")
-    p.add_argument("--target", default="meta-llama/Llama-3.1-8B-Instruct")
-    p.add_argument("--eagle3-draft", default="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")
-    p.add_argument(
-        "--prompt", default="Explain what speculative decoding is, in two sentences."
-    )
+    p.add_argument("--mode", default="text", choices=["text", "vl"])
+    p.add_argument("--target", default=None)
+    p.add_argument("--eagle3-draft", default=None)
+    p.add_argument("--tsv", default=DEFAULT_VL_TSV)
+    p.add_argument("--explain", action="store_true")
+    p.add_argument("--prompt", default=FIXED_PROMPTS[0])
     p.add_argument("--max-new-tokens", type=int, default=128)
     p.add_argument("--warmup-tokens", type=int, default=32)
     p.add_argument("--topk", type=int, default=8)
@@ -97,7 +127,7 @@ def main() -> None:
     )
     p.add_argument(
         "--verify-attn-backend",
-        default="auto",
+        default="triton_tree",
         choices=["auto", "eager", "flash_attn", "triton_tree"],
     )
     p.add_argument("--device", default="cuda")
@@ -127,17 +157,22 @@ def main() -> None:
     )
     import spec_decoding.eagle3_sgl.runner as runner_mod
 
-    if hasattr(runner_mod, "_PROFILE"):
-        assert runner_mod._PROFILE, "EAGLE3_PROFILE 未启用(需在 import 前设置)"
+    assert runner_mod._PROFILE, "EAGLE3_SGL_PROFILE 未启用(需在 import 前设置)"
 
-    tok, target, target_id = _load_target(args.target, device, dtype)
-    n_layers = int(target.config.num_hidden_layers)
+    preset = MODE_PRESETS[args.mode]
+    target_id_arg = args.target or preset["target"]
+    draft_id = args.eagle3_draft or preset["draft"]
+    tok, target, target_id, processor = load_target(
+        target_id_arg, device, dtype, args.mode
+    )
+    text_config = getattr(target.config, "text_config", target.config)
+    n_layers = int(text_config.num_hidden_layers)
 
-    draft_cfg_path = hf_hub_download(args.eagle3_draft, "config.json")
+    draft_cfg_path = hf_hub_download(draft_id, "config.json")
     draft_vocab_size = int(
         json.load(open(draft_cfg_path)).get("draft_vocab_size", 32000)
     )
-    draft_bin = hf_hub_download(args.eagle3_draft, "pytorch_model.bin")
+    draft_bin = hf_hub_download(draft_id, preset["draft_weight_file"])
 
     cfg = Eagle3SglConfig(
         topk=args.topk,
@@ -161,30 +196,29 @@ def main() -> None:
         dtype=dtype,
     )
     gen = Eagle3SglGenerator(target, cfg, draft)
-    if getattr(tok, "chat_template", None):
-        out = tok.apply_chat_template(
-            [{"role": "user", "content": args.prompt}],
-            add_generation_prompt=True,
-            return_tensors="pt",
-        )
-        if hasattr(out, "input_ids"):
-            ids = out.input_ids
-        elif isinstance(out, dict):
-            ids = out["input_ids"]
-        else:
-            ids = out
-        input_ids = ids.to(device)
+    if args.mode == "vl":
+        question, image = load_vl_samples(args.tsv, 1)[0]
+        prompt = question + (EXPLAIN_SUFFIX if args.explain else "")
+        input_ids, multimodal_inputs = build_vl_input(processor, prompt, image, device)
     else:
-        input_ids = tok(args.prompt, return_tensors="pt")["input_ids"].to(device)
+        prompt = args.prompt + (EXPLAIN_SUFFIX if args.explain else "")
+        input_ids = build_input_ids(tok, prompt, device)
+        multimodal_inputs = None
     eos = tok.eos_token_id
 
     # 预热(含 CUDA graph / kernel autotune / 编译缓存),不计入 profile
     print("[profile] warmup ...", flush=True)
     with torch.inference_mode():
-        gen.generate(input_ids, max_new_tokens=args.warmup_tokens, eos_token_id=eos)
+        gen.generate(
+            input_ids,
+            max_new_tokens=args.warmup_tokens,
+            eos_token_id=eos,
+            multimodal_inputs=multimodal_inputs,
+        )
     gen.n_rounds = 0
     gen.n_accepted_tokens = 0
     gen.n_proposed_draft_tokens = 0
+    gen.n_tree_nodes = 0
     if torch.cuda.is_available():
         torch.cuda.synchronize()
 
@@ -201,7 +235,10 @@ def main() -> None:
     ) as prof:
         with torch.inference_mode():
             out_ids = gen.generate(
-                input_ids, max_new_tokens=args.max_new_tokens, eos_token_id=eos
+                input_ids,
+                max_new_tokens=args.max_new_tokens,
+                eos_token_id=eos,
+                multimodal_inputs=multimodal_inputs,
             )
         if torch.cuda.is_available():
             torch.cuda.synchronize()
@@ -212,7 +249,8 @@ def main() -> None:
 
     header = (
         f"\n==================== EAGLE3 torch.profiler ====================\n"
-        f"target={target_id} verify={args.verify_mode}({args.verify_attn_backend}) "
+        f"mode={args.mode} target={target_id} draft={draft_id}\n"
+        f"verify={args.verify_mode}({args.verify_attn_backend}) "
         f"topk={args.topk} steps={args.num_steps} nodes={args.max_tree_nodes} dtype={args.dtype}\n"
         f"new_tokens={n_new} rounds={gen.n_rounds} accept/round={accept:.2f} "
         f"wall={wall:.2f}s spec_tok/s={n_new / wall:.2f}"
@@ -220,7 +258,9 @@ def main() -> None:
     print(header)
 
     stage = _stage_table(prof)
+    counts = _counts_table(prof)
     print(stage)
+    print(counts)
 
     by_self_cuda = prof.key_averages().table(
         sort_by="self_cuda_time_total", row_limit=args.top_n
@@ -241,6 +281,7 @@ def main() -> None:
         with open(args.report_out, "w", encoding="utf-8") as f:
             f.write(header + "\n")
             f.write(stage + "\n")
+            f.write(counts + "\n")
             f.write("\n== Top self CUDA ==\n")
             f.write(by_self_cuda + "\n")
             f.write("\n== Top self CPU ==\n")

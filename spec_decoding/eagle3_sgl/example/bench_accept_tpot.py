@@ -35,6 +35,9 @@ dtype 注意: bf16 只有 7 位尾数, 长序列(>100 token)下 baseline 与 ver
         --mode vl --num-prompts 10 --max-new-tokens 128 --explain
 
 verify 默认走 triton_tree kernel, 需要退回 HF sdpa 时加 --verify-backend eager.
+本脚本不开启 profile, 用于干净的 HF 速度对比. 诊断耗时占比使用:
+- time_stages_eagle3_sgl.py: 分阶段墙钟和 verify 内部拆解.
+- profile_eagle3_sgl.py: torch.profiler 算子, 同步, 拷贝和 launch 统计.
 """
 
 from __future__ import annotations
@@ -396,11 +399,22 @@ def main() -> None:
             eos_token_id=eos,
             multimodal_inputs=warmup_mm,
         )
+    # HF baseline 也单独预热, 避免第一次 generate 的 cache 分配和冷启动计入对比.
+    with torch.inference_mode():
+        target.generate(
+            warmup_ids,
+            max_new_tokens=8,
+            do_sample=False,
+            num_beams=1,
+            use_cache=True,
+            pad_token_id=eos,
+            **(warmup_mm or {}),
+        )
     generator.n_rounds = 0
     generator.n_accepted_tokens = 0
     generator.n_proposed_draft_tokens = 0
     generator.n_tree_nodes = 0
-    print("[bench] warmup done", flush=True)
+    print("[bench] warmup done (spec + HF baseline)", flush=True)
 
     summary = BenchSummary()
     for index, (input_ids, multimodal_inputs) in enumerate(samples):
