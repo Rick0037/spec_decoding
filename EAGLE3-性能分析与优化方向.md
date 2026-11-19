@@ -370,6 +370,8 @@ verify 后保留接受路径的 KV 和 hidden，只对 correction/bonus 做一�
 | P2 | 融合 RMSNorm/elementwise，复用临时 buffer | 小 kernel launch、临时分配 | 数值一致性和后端兼容性 |
 | 暂不做 | 重写 Triton attention、调 GEMM 微内核 | 当前占比较低 | 投入大、预期收益有限 |
 
+StaticCache + verify CUDA Graph 曾实现并实测（完整改动备份在 /tmp/eagle3_preconsume_plus_graph.patch 与 /tmp/eagle3_target_graph.py.bak，当前已回退）：verify 墙钟约 50→26ms，但干净端到端仅提升约 5%，因为 eager 路径的 launch 间隙大部分本来就被 GPU 计算重叠掉；replay 仍占约 45% 墙钟，是下一步最高收益目标（见 6.3 删除 replay 方案）。关键经验：transformers 5.20 的 StaticLayer.update 忽略 cache_position，写入位置只由 cumulative_length 决定，必须显式回滚写入指针，否则拒绝分支 KV 会污染前缀。
+
 ## 8. 每项优化的验证标准
 
 ### 正确性

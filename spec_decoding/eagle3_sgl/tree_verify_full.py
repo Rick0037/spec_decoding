@@ -6,10 +6,11 @@
 attention 对新 token 段施加树掩码(兄弟分支不可互看),再按 parent→child
 规则做 greedy 接受。
 
-两条入口
+三条入口
 --------
 - full_tree_verify_extend:HF sdpa + [1,1,L,past+L] 4D 树 cross mask。
 - full_tree_verify_triton:SGLang extend_attention_fwd + custom_mask。
+- full_tree_verify_commit:verify 后不 crop, 把接受路径 KV/feature 提交进前缀(skip_replay)。
 
 verify 临时扩展 cache,取完 logits 后 crop 还原,不污染 runner 的 past;
 root 接受用 recovery_logits(out_ids 之后那一位的 logits)。
@@ -17,12 +18,14 @@ root 接受用 recovery_logits(out_ids 之后那一位的 logits)。
 
 from __future__ import annotations
 
-from typing import Any, List, Tuple
+import contextlib
+from typing import Any, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 from transformers import PreTrainedModel
 
+from .hidden import select_eagle_acts_from_hidden_states
 from .tree_verify_mask import (
     TreeLayout,
     build_tree_cross_attn_bias_with_prefix,
@@ -109,11 +112,13 @@ def _forward_target_tree_and_restore_cache(
 
 def _select_append_root_child(
     tree_node_next_token_logits: torch.Tensor,
-    root_logits: torch.Tensor,
+    root_logits: Optional[torch.Tensor],
     parent: List[int],
     token_ids: List[int],
     leaves: List[int],
-) -> Tuple[List[int], int]:
+    *,
+    confirmed_root: bool = False,
+) -> Tuple[List[int], int, List[int]]:
     """
     第一次 prefill:
     输出 = target(["The", "cat"])
@@ -133,9 +138,13 @@ def _select_append_root_child(
     # * 从之前的 每个路径上都进行D2H 现在变成一次性进行
     # root 和整棵树分别批量 argmax, 拼接后只做一次 D2H.
     # target_next_tokens[0] 是 root 预测, target_next_tokens[i+1] 是树节点 i 预测.
-    root_next_token = root_logits.reshape(-1).argmax(dim=-1, keepdim=True)
     tree_next_tokens = tree_node_next_token_logits.argmax(dim=-1)
-    target_next_tokens = torch.cat([root_next_token, tree_next_tokens]).tolist()
+    if confirmed_root:
+        # 确定根必被接受: root 预测直接取根 token 本身, 不需要外部 recovery logits.
+        target_next_tokens = [token_ids[0]] + tree_next_tokens.tolist()
+    else:
+        root_next_token = root_logits.reshape(-1).argmax(dim=-1, keepdim=True)
+        target_next_tokens = torch.cat([root_next_token, tree_next_tokens]).tolist()
 
     best_accepted_len, best_next_token, best_leaf = -1, 0, 0
     for leaf in leaves:
@@ -153,8 +162,8 @@ def _select_append_root_child(
     best_path_tokens = [token_ids[i] for i in best_path_nodes]
     # ! 接收长度的token + 一个 target的 next new token
     append_list = best_path_tokens[:best_accepted_len] + [best_next_token]
-    # 同时返回选中路径的 draft 候选数, 不统计其他分支.
-    return append_list, len(best_path_nodes)
+    # 同时返回选中路径的 draft 候选数(不统计其他分支)和接受节点下标(根→叶顺序).
+    return append_list, len(best_path_nodes), best_path_nodes[:best_accepted_len]
 
 
 def _match_one_leaf_path(
@@ -213,9 +222,10 @@ def full_tree_verify_extend(
         position_ids=pos,
         attention_mask=cross,
     )  # [L, V]
-    return _select_append_root_child(
+    append_list, proposed_draft_tokens, _ = _select_append_root_child(
         node_logits, recovery_logits, layout.parent, layout.token_ids, leaves
     )
+    return append_list, proposed_draft_tokens
 
 
 @torch.inference_mode()
@@ -264,10 +274,106 @@ def full_tree_verify_triton(
         # [L, V]
     # * 一次验证的逻辑, 贪心, 没有对比draft 以及 target的logits, 直接one-hot对比输出
     # * node_logits == logit[0] -> [seq_len, vob_size]
-    return _select_append_root_child(
+    append_list, proposed_draft_tokens, _ = _select_append_root_child(
         tree_node_next_token_logits,
         root_logits,
         layout.parent,
         layout.token_ids,
         leaves,
     )
+    return append_list, proposed_draft_tokens
+
+
+def _commit_accepted_tree_kv(
+    past_key_values: Any,
+    past_len: int,
+    accepted_nodes: List[int],
+    device: torch.device,
+) -> None:
+    """把接受路径的 KV 按根→叶顺序提交进前缀 cache, 丢弃其余分支.
+
+    verify forward 后 cache 长度为 past_len + L, 接受节点 i 的 KV 行在
+    past_len + i. 树按 BFS 序摊平, 接受路径散布其中, 必须按路径顺序收行;
+    提交后 cache 长度 = past_len + len(accepted_nodes), 等价于 replay 过接受 token.
+    """
+    if not accepted_nodes:
+        # 一个节点都没接受时, 也要去掉本次 verify 追加的整棵树 KV.
+        _crop_cache_back_to(past_key_values, past_len)
+        return
+    layers = getattr(past_key_values, "layers", None)
+    if layers is None:
+        raise TypeError("skip_replay commit requires transformers 5.x DynamicCache")
+    rows = torch.tensor(accepted_nodes, device=device, dtype=torch.long) + past_len
+    for layer in layers:
+        layer.keys = torch.cat(
+            [layer.keys[:, :, :past_len], layer.keys.index_select(2, rows)], dim=2
+        )
+        layer.values = torch.cat(
+            [layer.values[:, :, :past_len], layer.values.index_select(2, rows)], dim=2
+        )
+
+
+@torch.inference_mode()
+def full_tree_verify_commit(
+    target_m: PreTrainedModel,
+    layout: TreeLayout,
+    past_key_values: Any,
+    past_len: int,
+    recovery_logits: Optional[torch.Tensor],
+    *,
+    leaves: List[int],
+    device: torch.device,
+    eagle_layers: List[int],
+    rope_delta: int = 0,
+    confirmed_root: bool = False,
+    use_triton: bool = False,
+) -> Tuple[List[int], int, torch.Tensor]:
+    """verify 并顺带提交接受路径的 KV 和 feature, 供 skip_replay 省掉每轮 target replay.
+
+    与 extend 的区别: forward 带 output_hidden_states=True, 选完路径后不 crop,
+    而是把接受节点的 KV 行按路径顺序收进前缀, 并取出接受节点的多层 feature.
+    confirmed_root=True 时根节点是已确定 token(必被接受), recovery_logits 可为 None.
+
+    返回 (append_list, proposed_draft_tokens, accepted_features [1, m, n*H]),
+    m = len(append_list) - 1 为提交的节点数, feature 行与接受 token 一一对应.
+    """
+    L = len(layout)
+    dtype = next(target_m.parameters()).dtype
+    tree_tokens = torch.tensor([layout.token_ids], device=device, dtype=torch.long)
+    pos = layout_tree_position_ids(layout, past_len, rope_delta).unsqueeze(0).to(device)
+    if use_triton:
+        meta = build_triton_tree_verify_metadata(layout, past_len, device=device)
+        attn_context = tree_verify_triton_attention_context(
+            _decoder_stack(target_m), meta
+        )
+        attention_mask = torch.ones(1, L, device=device, dtype=torch.long)
+    else:
+        attn_context = contextlib.nullcontext()
+        attention_mask = build_tree_cross_attn_bias_with_prefix(
+            layout, past_len, device=device, dtype=dtype
+        ).view(1, 1, L, past_len + L)
+    with attn_context:
+        out = target_m(
+            tree_tokens,
+            past_key_values=past_key_values,
+            position_ids=pos,
+            use_cache=True,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+        )
+    append_list, proposed_draft_tokens, accepted_nodes = _select_append_root_child(
+        out.logits[0],
+        recovery_logits,
+        layout.parent,
+        layout.token_ids,
+        leaves,
+        confirmed_root=confirmed_root,
+    )
+    _commit_accepted_tree_kv(past_key_values, past_len, accepted_nodes, device)
+    # hidden_states 只含本次 forward 的 L 个树节点, 按接受节点下标取 feature.
+    node_features = select_eagle_acts_from_hidden_states(
+        out.hidden_states, eagle_layers, last_token_only=False
+    )
+    accepted_rows = torch.tensor(accepted_nodes, device=device, dtype=torch.long)
+    accepted_features = node_features.index_select(1, accepted_rows)
+    return append_list, proposed_draft_tokens, accepted_features

@@ -37,6 +37,7 @@ from .tree_draft import expand_draft_tree_ar
 from .tree_verify_mask import TreeLayout
 from .tree_verify_attn import triton_extend_available
 from .tree_verify_full import (
+    full_tree_verify_commit,
     full_tree_verify_extend,
     full_tree_verify_triton,
 )
@@ -178,7 +179,7 @@ class _DraftKvState:
     root_hidden: torch.Tensor
     """末位置的 draft hidden [1, hidden_size]，作为各分支递归展开的初始条件。"""
     confirmed_root_token: Optional[int] = None
-    """首轮 target 已确定且 draft 已消费的根 token, 其他轮为 None."""
+    """target 已确定且 draft 已消费的根 token(首轮 preconsume 或 skip_replay 稳态轮的 pending)."""
 
 
 # -----------------------------------------------------------------------------
@@ -562,6 +563,13 @@ class Eagle3SglGenerator:
         """
         generate 主流程, prefill target -> prefill draft
         """
+        if self.cfg.skip_replay:
+            return self._generate_no_replay(
+                input_ids,
+                max_new_tokens=max_new_tokens,
+                eos_token_id=eos_token_id,
+                multimodal_inputs=multimodal_inputs,
+            )
         out_ids = input_ids.clone()
         num_new_tokens = 0
         # * 1. traget 进行 prefill 生产 feature, draft 进行 prefill, 生成 draft state
@@ -603,5 +611,96 @@ class Eagle3SglGenerator:
             self.n_rounds += 1
             self.n_accepted_tokens += int(append.numel())
             if eos_token_id is not None and (append == eos_token_id).any():
+                break
+        return out_ids
+
+    # ------------------------------------------------------------------
+    # skip_replay 主流程:verify 顺带提交接受路径的 KV 和 feature, 不做 target replay.
+    # ------------------------------------------------------------------
+    @torch.inference_mode()
+    def _generate_no_replay(
+        self,
+        input_ids: torch.LongTensor,
+        *,
+        max_new_tokens: int,
+        eos_token_id: Optional[int] = None,
+        multimodal_inputs: Optional[dict] = None,
+    ) -> torch.LongTensor:
+        """无 replay 生成:每轮只有一次 target forward(verify 即提交).
+
+        稳态不变量:out_ids 末位 pending 是已确定但尚未被 target forward 的 token;
+        past 和 acts_all 覆盖 out_ids[:-1], draft 已消费全部 out_ids.
+        每轮把 pending 作为确定根建树(必被接受), verify 提交接受路径的 KV/feature,
+        bonus token 成为下一轮的 pending, 从而省掉 replay forward.
+        """
+        device = input_ids.device
+        out_ids = input_ids.clone()
+        num_new_tokens = 0
+        past, recovery_logits, acts_all, draft_state = self._prefill_target_and_draft(
+            out_ids, multimodal_inputs=multimodal_inputs
+        )
+        # 与 generate_step_payload 相同的 backend 选择逻辑.
+        backend = self.cfg.verify_attn_backend
+        target_on_cuda = next(self.target_m.parameters()).device.type == "cuda"
+        use_triton = backend == "triton_tree" or (
+            backend == "auto"
+            and self.cfg.topk > 1
+            and target_on_cuda
+            and triton_extend_available()
+        )
+        pending_in_out_ids = False
+        while num_new_tokens < max_new_tokens:
+            last_token = int(out_ids[0, -1].item())
+            if eos_token_id is not None and last_token == eos_token_id:
+                break  # pending 可能已是 EOS, 无需再 forward
+            if pending_in_out_ids:
+                # 稳态轮: pending 视作 draft 已预消费的确定根, 与首轮 preconsume 状态对齐.
+                # forward 前缀是 out_ids[:-1], draft.prefix_len 恰好比它大 1.
+                draft_state.confirmed_root_token = last_token
+                forwarded_prefix = out_ids[:, :-1]
+                recovery_logits = None
+            else:
+                forwarded_prefix = out_ids
+            with _prof("stage:draft_build_tree"):
+                layout = self._build_tree(forwarded_prefix, draft_state)
+            self.n_tree_nodes += len(layout)
+            leaves = _leaf_indices(layout.parent)
+            confirmed_root = draft_state.confirmed_root_token is not None
+            with _prof("stage:target_verify_commit"):
+                (
+                    append_list,
+                    proposed_draft_tokens,
+                    accepted_features,
+                ) = full_tree_verify_commit(
+                    self.target_m,
+                    layout,
+                    past,
+                    int(forwarded_prefix.shape[1]),
+                    recovery_logits,
+                    leaves=leaves,
+                    device=device,
+                    eagle_layers=self.eagle_layers,
+                    rope_delta=self._rope_delta,
+                    confirmed_root=confirmed_root,
+                    use_triton=use_triton,
+                )
+            if confirmed_root:
+                # 确定根节点不是 draft 提议, 不计入 proposed 统计.
+                proposed_draft_tokens -= 1
+            self.n_proposed_draft_tokens += proposed_draft_tokens
+            append = torch.tensor([append_list], device=device, dtype=torch.long)
+            # 接受节点的 feature 直接并入 acts_all, 无需 replay 重算.
+            acts_all = torch.cat([acts_all, accepted_features], dim=1)
+            draft_state = self._update_draft_after_verify(append, acts_all, draft_state)
+            if pending_in_out_ids:
+                new_tokens = append[:, 1:]  # pending 已在 out_ids 里, 不重复追加
+            else:
+                new_tokens = append
+            out_ids = torch.cat([out_ids, new_tokens], dim=1)
+            num_new_tokens += int(new_tokens.numel())
+            self.n_rounds += 1
+            self.n_accepted_tokens += int(new_tokens.numel())
+            pending_in_out_ids = True
+            if eos_token_id is not None and (new_tokens == eos_token_id).any():
                 break
         return out_ids
