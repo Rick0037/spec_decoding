@@ -1,0 +1,12 @@
+
+==================== EAGLE3-SGL 分阶段墙钟（CUDA event 同步计时）====================
+new_tokens=81 rounds=31 accept/round=2.61 wall=4.35s spec_tok/s=18.62
+stage                      calls    total_ms  %measured    %wall   ms/call
+target_prefill                 1        16.2       0.5%     0.4%     16.20
+draft_prefill_init             1         1.0       0.0%     0.0%      0.96
+draft_build_tree              31       216.2       6.8%     5.0%      6.98
+target_verify                 31      2348.9      73.8%    54.0%     75.77
+target_replay                 31       567.5      17.8%    13.0%     18.31
+draft_extend                  31        34.2       1.1%     0.8%      1.10
+(measured sum)                        3184.0     100.0%    73.2%
+(unmeasured/python)                   1166.0               26.8%
