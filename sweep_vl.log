@@ -1,0 +1,516 @@
+=== [A] depth=2 topk=1 budget=300 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   2%|▏         | 17/750 [00:00<00:12, 58.08it/s]Loading weights:   4%|▍         | 32/750 [00:00<00:08, 86.58it/s]Loading weights:   6%|▌         | 43/750 [00:00<00:10, 70.24it/s]Loading weights:   7%|▋         | 52/750 [00:00<00:14, 49.57it/s]Loading weights:   8%|▊         | 59/750 [00:01<00:15, 45.58it/s]Loading weights:   9%|▉         | 70/750 [00:01<00:16, 42.46it/s]Loading weights:  11%|█         | 81/750 [00:01<00:14, 45.23it/s]Loading weights:  12%|█▏        | 92/750 [00:01<00:13, 48.05it/s]Loading weights:  13%|█▎        | 98/750 [00:01<00:13, 50.06it/s]Loading weights:  14%|█▍        | 105/750 [00:02<00:14, 45.59it/s]Loading weights:  15%|█▌        | 114/750 [00:02<00:11, 53.47it/s]Loading weights:  16%|█▋        | 122/750 [00:02<00:10, 58.14it/s]Loading weights:  17%|█▋        | 129/750 [00:02<00:12, 51.47it/s]Loading weights:  18%|█▊        | 136/750 [00:02<00:13, 44.74it/s]Loading weights:  20%|█▉        | 147/750 [00:02<00:14, 41.87it/s]Loading weights:  21%|██        | 158/750 [00:03<00:13, 45.29it/s]Loading weights:  22%|██▏       | 166/750 [00:03<00:11, 50.67it/s]Loading weights:  23%|██▎       | 172/750 [00:03<00:12, 44.81it/s]Loading weights:  24%|██▍       | 180/750 [00:03<00:13, 43.10it/s]Loading weights:  25%|██▌       | 191/750 [00:03<00:12, 46.23it/s]Loading weights:  27%|██▋       | 202/750 [00:04<00:13, 41.93it/s]Loading weights:  28%|██▊       | 213/750 [00:04<00:13, 41.04it/s]Loading weights:  30%|██▉       | 224/750 [00:04<00:13, 39.50it/s]Loading weights:  31%|███▏      | 235/750 [00:04<00:11, 43.23it/s]Loading weights:  33%|███▎      | 246/750 [00:05<00:11, 45.61it/s]Loading weights:  34%|███▍      | 257/750 [00:05<00:10, 49.04it/s]Loading weights:  36%|███▌      | 268/750 [00:05<00:09, 50.44it/s]Loading weights:  37%|███▋      | 279/750 [00:05<00:09, 52.02it/s]Loading weights:  39%|███▊      | 289/750 [00:05<00:07, 60.17it/s]Loading weights:  39%|███▉      | 296/750 [00:06<00:10, 44.62it/s]Loading weights:  40%|████      | 302/750 [00:06<00:09, 46.54it/s]Loading weights:  41%|████      | 309/750 [00:06<00:08, 50.86it/s]Loading weights:  42%|████▏     | 315/750 [00:06<00:09, 44.32it/s]Loading weights:  43%|████▎     | 322/750 [00:06<00:08, 49.52it/s]Loading weights:  44%|████▎     | 328/750 [00:06<00:08, 50.75it/s]Loading weights:  45%|████▍     | 334/750 [00:07<00:09, 42.03it/s]Loading weights:  46%|████▌     | 345/750 [00:07<00:10, 40.43it/s]Loading weights:  47%|████▋     | 356/750 [00:07<00:08, 44.78it/s]Loading weights:  49%|████▉     | 367/750 [00:07<00:07, 48.25it/s]Loading weights:  50%|█████     | 375/750 [00:07<00:07, 52.84it/s]Loading weights:  51%|█████     | 381/750 [00:07<00:07, 46.21it/s]Loading weights:  52%|█████▏    | 389/750 [00:08<00:09, 38.00it/s]Loading weights:  53%|█████▎    | 401/750 [00:08<00:06, 51.06it/s]Loading weights:  55%|█████▌    | 413/750 [00:08<00:05, 63.64it/s]Loading weights:  59%|█████▊    | 440/750 [00:08<00:02, 107.53it/s]Loading weights:  64%|██████▍   | 479/750 [00:08<00:01, 144.31it/s]Loading weights:  66%|██████▌   | 495/750 [00:08<00:01, 145.18it/s]Loading weights:  68%|██████▊   | 511/750 [00:09<00:01, 147.89it/s]Loading weights:  74%|███████▍  | 556/750 [00:09<00:00, 222.98it/s]Loading weights:  78%|███████▊  | 587/750 [00:09<00:00, 245.74it/s]Loading weights:  82%|████████▏ | 614/750 [00:09<00:00, 241.73it/s]Loading weights:  85%|████████▌ | 640/750 [00:09<00:00, 202.43it/s]Loading weights:  88%|████████▊ | 663/750 [00:09<00:00, 200.70it/s]Loading weights:  91%|█████████▏| 685/750 [00:09<00:00, 172.84it/s]Loading weights:  94%|█████████▍| 704/750 [00:09<00:00, 172.73it/s]Loading weights:  97%|█████████▋| 725/750 [00:10<00:00, 178.76it/s]Loading weights:  99%|█████████▉| 744/750 [00:10<00:00, 149.90it/s]Loading weights: 100%|██████████| 750/750 [00:10<00:00, 73.51it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=129 rounds=63 tau=2.05 proposed/round=2.00 spec_tpot=63.1ms base_tpot=43.4ms lossless=True
+[02] new=128 rounds=61 tau=2.10 proposed/round=2.00 spec_tpot=54.8ms base_tpot=48.1ms lossless=True
+[03] new=128 rounds=72 tau=1.78 proposed/round=2.00 spec_tpot=61.6ms base_tpot=53.4ms lossless=True
+[04] new=128 rounds=68 tau=1.88 proposed/round=2.00 spec_tpot=61.2ms base_tpot=49.7ms lossless=True
+[05] new=129 rounds=66 tau=1.95 proposed/round=2.00 spec_tpot=57.6ms base_tpot=53.6ms lossless=True
+[06] new=130 rounds=58 tau=2.24 proposed/round=2.00 spec_tpot=43.2ms base_tpot=40.1ms lossless=True
+[07] new=128 rounds=67 tau=1.91 proposed/round=2.00 spec_tpot=56.2ms base_tpot=36.0ms lossless=True
+[08] new=130 rounds=60 tau=2.17 proposed/round=2.00 spec_tpot=39.3ms base_tpot=41.2ms lossless=True
+[09] new=128 rounds=67 tau=1.91 proposed/round=2.00 spec_tpot=64.8ms base_tpot=52.0ms lossless=True
+[10] new=129 rounds=64 tau=2.02 proposed/round=2.00 spec_tpot=62.2ms base_tpot=44.4ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=1 num_steps(depth)=2 max_tree_nodes=300
+total_new_tokens=1287 total_rounds=646
+accepted_tokens=1287 proposed_draft_tokens=1292
+tau(accept_length)=1.992 proposed/round=2.000
+tree_nodes/round=2.00 (verify 实际算了这么多节点)
+ms/round=112.30
+spec:   TPOT=56.37ms  throughput=17.74 tok/s  wall=72.54s
+baseline: TPOT=46.20ms  throughput=21.65 tok/s  wall=59.14s
+speedup=0.82x  lossless(all)=True
+=============================================================
+=== [A] depth=2 topk=2 budget=300 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   2%|▏         | 12/750 [00:00<00:09, 75.37it/s]Loading weights:   3%|▎         | 20/750 [00:00<00:09, 73.36it/s]Loading weights:   4%|▎         | 28/750 [00:00<00:13, 54.87it/s]Loading weights:   5%|▍         | 37/750 [00:00<00:13, 51.70it/s]Loading weights:   6%|▋         | 48/750 [00:00<00:13, 50.78it/s]Loading weights:   8%|▊         | 59/750 [00:01<00:13, 52.60it/s]Loading weights:   9%|▉         | 70/750 [00:01<00:14, 45.94it/s]Loading weights:  11%|█         | 81/750 [00:01<00:15, 42.12it/s]Loading weights:  12%|█▏        | 89/750 [00:01<00:13, 47.91it/s]Loading weights:  13%|█▎        | 95/750 [00:01<00:13, 49.80it/s]Loading weights:  14%|█▎        | 103/750 [00:02<00:15, 41.24it/s]Loading weights:  15%|█▌        | 114/750 [00:02<00:12, 51.53it/s]Loading weights:  17%|█▋        | 125/750 [00:02<00:11, 52.81it/s]Loading weights:  18%|█▊        | 136/750 [00:02<00:13, 46.22it/s]Loading weights:  20%|█▉        | 147/750 [00:02<00:12, 49.82it/s]Loading weights:  21%|██        | 155/750 [00:03<00:10, 54.11it/s]Loading weights:  22%|██▏       | 162/750 [00:03<00:10, 55.57it/s]Loading weights:  23%|██▎       | 169/750 [00:03<00:13, 41.98it/s]Loading weights:  24%|██▍       | 180/750 [00:03<00:12, 45.89it/s]Loading weights:  25%|██▌       | 191/750 [00:03<00:13, 42.60it/s]Loading weights:  27%|██▋       | 202/750 [00:04<00:10, 52.40it/s]Loading weights:  28%|██▊       | 210/750 [00:04<00:09, 55.22it/s]Loading weights:  29%|██▉       | 217/750 [00:04<00:10, 50.16it/s]Loading weights:  30%|██▉       | 224/750 [00:04<00:11, 45.56it/s]Loading weights:  31%|███▏      | 235/750 [00:04<00:10, 48.39it/s]Loading weights:  33%|███▎      | 246/750 [00:04<00:10, 50.07it/s]Loading weights:  34%|███▍      | 257/750 [00:05<00:10, 45.85it/s]Loading weights:  35%|███▌      | 265/750 [00:05<00:09, 51.07it/s]Loading weights:  36%|███▌      | 271/750 [00:05<00:10, 44.10it/s]Loading weights:  37%|███▋      | 279/750 [00:05<00:11, 42.20it/s]Loading weights:  39%|███▊      | 290/750 [00:06<00:11, 40.87it/s]Loading weights:  40%|████      | 301/750 [00:06<00:10, 43.60it/s]Loading weights:  42%|████▏     | 312/750 [00:06<00:09, 47.24it/s]Loading weights:  43%|████▎     | 323/750 [00:06<00:09, 43.93it/s]Loading weights:  45%|████▍     | 334/750 [00:06<00:08, 47.15it/s]Loading weights:  46%|████▌     | 342/750 [00:07<00:07, 52.35it/s]Loading weights:  46%|████▋     | 348/750 [00:07<00:08, 44.79it/s]Loading weights:  47%|████▋     | 356/750 [00:07<00:09, 43.72it/s]Loading weights:  49%|████▉     | 367/750 [00:07<00:08, 46.69it/s]Loading weights:  50%|█████     | 378/750 [00:07<00:07, 48.22it/s]Loading weights:  52%|█████▏    | 389/750 [00:08<00:07, 50.66it/s]Loading weights:  54%|█████▍    | 405/750 [00:08<00:04, 69.39it/s]Loading weights:  58%|█████▊    | 434/750 [00:08<00:03, 98.45it/s]Loading weights:  60%|██████    | 451/750 [00:08<00:02, 110.86it/s]Loading weights:  65%|██████▍   | 485/750 [00:08<00:01, 157.69it/s]Loading weights:  67%|██████▋   | 503/750 [00:08<00:01, 135.51it/s]Loading weights:  69%|██████▉   | 519/750 [00:08<00:01, 139.05it/s]Loading weights:  71%|███████▏  | 535/750 [00:09<00:01, 114.69it/s]Loading weights:  74%|███████▍  | 557/750 [00:09<00:01, 136.76it/s]Loading weights:  76%|███████▋  | 573/750 [00:09<00:01, 141.94it/s]Loading weights:  80%|████████  | 600/750 [00:09<00:00, 173.68it/s]Loading weights:  86%|████████▌ | 643/750 [00:09<00:00, 194.28it/s]Loading weights:  90%|█████████ | 676/750 [00:09<00:00, 224.98it/s]Loading weights:  93%|█████████▎| 700/750 [00:09<00:00, 187.55it/s]Loading weights:  97%|█████████▋| 725/750 [00:10<00:00, 160.26it/s]Loading weights:  99%|█████████▉| 743/750 [00:10<00:00, 140.26it/s]Loading weights: 100%|██████████| 750/750 [00:10<00:00, 73.08it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=130 rounds=57 tau=2.28 proposed/round=2.00 spec_tpot=43.1ms base_tpot=33.7ms lossless=True
+[02] new=128 rounds=59 tau=2.17 proposed/round=2.00 spec_tpot=48.9ms base_tpot=35.1ms lossless=True
+[03] new=128 rounds=63 tau=2.03 proposed/round=2.00 spec_tpot=54.0ms base_tpot=46.4ms lossless=True
+[04] new=128 rounds=60 tau=2.13 proposed/round=2.00 spec_tpot=52.5ms base_tpot=35.5ms lossless=True
+[05] new=129 rounds=56 tau=2.30 proposed/round=2.00 spec_tpot=42.5ms base_tpot=46.5ms lossless=True
+[06] new=130 rounds=56 tau=2.32 proposed/round=2.00 spec_tpot=48.3ms base_tpot=36.3ms lossless=True
+[07] new=128 rounds=60 tau=2.13 proposed/round=2.00 spec_tpot=48.5ms base_tpot=45.6ms lossless=True
+[08] new=130 rounds=54 tau=2.41 proposed/round=2.00 spec_tpot=41.1ms base_tpot=44.1ms lossless=True
+[09] new=128 rounds=63 tau=2.03 proposed/round=2.00 spec_tpot=44.1ms base_tpot=38.0ms lossless=True
+[10] new=129 rounds=59 tau=2.19 proposed/round=2.00 spec_tpot=42.6ms base_tpot=38.5ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=2 num_steps(depth)=2 max_tree_nodes=300
+total_new_tokens=1288 total_rounds=587
+accepted_tokens=1288 proposed_draft_tokens=1174
+tau(accept_length)=2.194 proposed/round=2.000
+tree_nodes/round=6.00 (verify 实际算了这么多节点)
+ms/round=102.17
+spec:   TPOT=46.56ms  throughput=21.48 tok/s  wall=59.97s
+baseline: TPOT=39.97ms  throughput=25.02 tok/s  wall=51.16s
+speedup=0.86x  lossless(all)=True
+=============================================================
+=== [A] depth=2 topk=4 budget=300 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   2%|▏         | 17/750 [00:00<00:04, 159.71it/s]Loading weights:   4%|▍         | 33/750 [00:00<00:11, 60.19it/s] Loading weights:   6%|▌         | 42/750 [00:00<00:10, 66.61it/s]Loading weights:   7%|▋         | 51/750 [00:00<00:12, 55.42it/s]Loading weights:   8%|▊         | 58/750 [00:00<00:13, 50.90it/s]Loading weights:   9%|▊         | 64/750 [00:01<00:13, 51.51it/s]Loading weights:   9%|▉         | 70/750 [00:01<00:15, 43.72it/s]Loading weights:  11%|█         | 81/750 [00:01<00:14, 47.28it/s]Loading weights:  12%|█▏        | 89/750 [00:01<00:14, 45.43it/s]Loading weights:  13%|█▎        | 94/750 [00:01<00:14, 44.72it/s]Loading weights:  13%|█▎        | 99/750 [00:01<00:14, 45.36it/s]Loading weights:  14%|█▍        | 104/750 [00:02<00:17, 37.23it/s]Loading weights:  15%|█▍        | 109/750 [00:02<00:18, 34.88it/s]Loading weights:  15%|█▌        | 114/750 [00:02<00:16, 37.77it/s]Loading weights:  16%|█▌        | 119/750 [00:02<00:15, 40.31it/s]Loading weights:  17%|█▋        | 125/750 [00:02<00:18, 34.49it/s]Loading weights:  18%|█▊        | 136/750 [00:02<00:16, 37.38it/s]Loading weights:  19%|█▊        | 140/750 [00:03<00:16, 35.95it/s]Loading weights:  20%|█▉        | 147/750 [00:03<00:15, 37.81it/s]Loading weights:  21%|██        | 158/750 [00:03<00:16, 36.89it/s]Loading weights:  23%|██▎       | 169/750 [00:03<00:15, 36.66it/s]Loading weights:  24%|██▍       | 180/750 [00:04<00:13, 41.06it/s]Loading weights:  25%|██▌       | 191/750 [00:04<00:13, 40.32it/s]Loading weights:  27%|██▋       | 200/750 [00:04<00:11, 47.46it/s]Loading weights:  27%|██▋       | 206/750 [00:04<00:12, 42.21it/s]Loading weights:  28%|██▊       | 213/750 [00:04<00:11, 46.15it/s]Loading weights:  29%|██▉       | 221/750 [00:04<00:11, 45.40it/s]Loading weights:  30%|███       | 226/750 [00:05<00:14, 36.68it/s]Loading weights:  31%|███▏      | 235/750 [00:05<00:12, 40.92it/s]Loading weights:  32%|███▏      | 240/750 [00:05<00:12, 42.19it/s]Loading weights:  33%|███▎      | 246/750 [00:05<00:13, 37.64it/s]Loading weights:  33%|███▎      | 251/750 [00:05<00:12, 39.40it/s]Loading weights:  35%|███▌      | 265/750 [00:05<00:09, 52.73it/s]Loading weights:  36%|███▌      | 271/750 [00:06<00:10, 44.55it/s]Loading weights:  37%|███▋      | 279/750 [00:06<00:09, 49.92it/s]Loading weights:  38%|███▊      | 285/750 [00:06<00:10, 43.99it/s]Loading weights:  39%|███▊      | 290/750 [00:06<00:12, 35.83it/s]Loading weights:  40%|████      | 301/750 [00:07<00:12, 36.98it/s]Loading weights:  42%|████▏     | 312/750 [00:07<00:10, 41.18it/s]Loading weights:  42%|████▏     | 317/750 [00:07<00:10, 42.47it/s]Loading weights:  43%|████▎     | 323/750 [00:07<00:12, 34.69it/s]Loading weights:  45%|████▍     | 334/750 [00:07<00:11, 35.22it/s]Loading weights:  46%|████▌     | 345/750 [00:08<00:11, 36.00it/s]Loading weights:  47%|████▋     | 356/750 [00:08<00:11, 35.79it/s]Loading weights:  49%|████▉     | 367/750 [00:08<00:10, 36.46it/s]Loading weights:  50%|█████     | 375/750 [00:08<00:10, 37.27it/s]Loading weights:  51%|█████     | 384/750 [00:09<00:08, 43.79it/s]Loading weights:  52%|█████▏    | 389/750 [00:09<00:09, 38.92it/s]Loading weights:  53%|█████▎    | 395/750 [00:09<00:08, 42.54it/s]Loading weights:  55%|█████▍    | 411/750 [00:09<00:05, 64.87it/s]Loading weights:  56%|█████▌    | 419/750 [00:09<00:04, 67.64it/s]Loading weights:  59%|█████▉    | 443/750 [00:09<00:02, 108.29it/s]Loading weights:  63%|██████▎   | 470/750 [00:09<00:01, 148.98it/s]Loading weights:  65%|██████▌   | 488/750 [00:09<00:01, 157.12it/s]Loading weights:  68%|██████▊   | 510/750 [00:10<00:01, 144.41it/s]Loading weights:  71%|███████   | 533/750 [00:10<00:01, 158.73it/s]Loading weights:  73%|███████▎  | 550/750 [00:10<00:01, 129.06it/s]Loading weights:  78%|███████▊  | 587/750 [00:10<00:01, 129.71it/s]Loading weights:  81%|████████  | 605/750 [00:10<00:01, 134.78it/s]Loading weights:  83%|████████▎ | 620/750 [00:10<00:00, 135.73it/s]Loading weights:  86%|████████▌ | 645/750 [00:11<00:00, 137.71it/s]Loading weights:  89%|████████▉ | 667/750 [00:11<00:00, 155.28it/s]Loading weights:  92%|█████████▏| 689/750 [00:11<00:00, 170.09it/s]Loading weights:  96%|█████████▌| 717/750 [00:11<00:00, 190.09it/s]Loading weights:  98%|█████████▊| 737/750 [00:11<00:00, 151.59it/s]Loading weights: 100%|██████████| 750/750 [00:11<00:00, 64.07it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=130 rounds=53 tau=2.45 proposed/round=2.00 spec_tpot=38.8ms base_tpot=42.2ms lossless=True
+[02] new=128 rounds=54 tau=2.37 proposed/round=2.00 spec_tpot=47.7ms base_tpot=44.0ms lossless=True
+[03] new=130 rounds=58 tau=2.24 proposed/round=2.00 spec_tpot=42.2ms base_tpot=36.5ms lossless=True
+[04] new=128 rounds=55 tau=2.33 proposed/round=2.00 spec_tpot=39.4ms base_tpot=34.3ms lossless=True
+[05] new=129 rounds=55 tau=2.35 proposed/round=2.00 spec_tpot=40.7ms base_tpot=37.8ms lossless=True
+[06] new=130 rounds=53 tau=2.45 proposed/round=2.00 spec_tpot=36.4ms base_tpot=35.4ms lossless=True
+[07] new=129 rounds=55 tau=2.35 proposed/round=2.00 spec_tpot=39.8ms base_tpot=34.7ms lossless=True
+[08] new=130 rounds=50 tau=2.60 proposed/round=2.00 spec_tpot=35.7ms base_tpot=35.8ms lossless=True
+[09] new=129 rounds=62 tau=2.08 proposed/round=2.00 spec_tpot=57.7ms base_tpot=36.4ms lossless=True
+[10] new=129 rounds=56 tau=2.30 proposed/round=2.00 spec_tpot=40.0ms base_tpot=40.3ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=4 num_steps(depth)=2 max_tree_nodes=300
+total_new_tokens=1292 total_rounds=551
+accepted_tokens=1292 proposed_draft_tokens=1102
+tau(accept_length)=2.345 proposed/round=2.000
+tree_nodes/round=20.00 (verify 实际算了这么多节点)
+ms/round=98.05
+spec:   TPOT=41.81ms  throughput=23.92 tok/s  wall=54.02s
+baseline: TPOT=37.73ms  throughput=26.50 tok/s  wall=48.30s
+speedup=0.90x  lossless(all)=True
+=============================================================
+=== [A] depth=2 topk=6 budget=300 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   2%|▏         | 15/750 [00:00<00:04, 147.14it/s]Loading weights:   4%|▍         | 30/750 [00:00<00:07, 93.48it/s] Loading weights:   5%|▌         | 41/750 [00:00<00:09, 73.53it/s]Loading weights:   7%|▋         | 50/750 [00:00<00:13, 51.95it/s]Loading weights:   8%|▊         | 59/750 [00:01<00:16, 42.70it/s]Loading weights:   9%|▉         | 70/750 [00:01<00:14, 45.46it/s]Loading weights:  10%|█         | 76/750 [00:01<00:14, 47.84it/s]Loading weights:  12%|█▏        | 89/750 [00:01<00:12, 52.14it/s]Loading weights:  13%|█▎        | 95/750 [00:01<00:14, 46.21it/s]Loading weights:  14%|█▎        | 103/750 [00:01<00:14, 45.83it/s]Loading weights:  15%|█▌        | 113/750 [00:02<00:11, 56.02it/s]Loading weights:  16%|█▌        | 120/750 [00:02<00:15, 41.26it/s]Loading weights:  17%|█▋        | 126/750 [00:02<00:14, 43.39it/s]Loading weights:  18%|█▊        | 136/750 [00:02<00:11, 53.51it/s]Loading weights:  19%|█▉        | 143/750 [00:02<00:12, 47.90it/s]Loading weights:  20%|█▉        | 149/750 [00:03<00:14, 41.46it/s]Loading weights:  21%|██        | 159/750 [00:03<00:15, 38.94it/s]Loading weights:  23%|██▎       | 169/750 [00:03<00:11, 49.20it/s]Loading weights:  24%|██▎       | 177/750 [00:03<00:10, 53.94it/s]Loading weights:  25%|██▍       | 184/750 [00:03<00:09, 57.25it/s]Loading weights:  25%|██▌       | 191/750 [00:03<00:11, 49.68it/s]Loading weights:  27%|██▋       | 202/750 [00:03<00:10, 51.70it/s]Loading weights:  28%|██▊       | 213/750 [00:04<00:10, 52.54it/s]Loading weights:  29%|██▉       | 219/750 [00:04<00:11, 46.13it/s]Loading weights:  30%|███       | 225/750 [00:04<00:10, 48.50it/s]Loading weights:  31%|███▏      | 235/750 [00:04<00:10, 47.98it/s]Loading weights:  33%|███▎      | 246/750 [00:05<00:11, 42.64it/s]Loading weights:  34%|███▍      | 257/750 [00:05<00:12, 40.64it/s]Loading weights:  36%|███▌      | 268/750 [00:05<00:10, 44.75it/s]Loading weights:  37%|███▋      | 279/750 [00:05<00:10, 46.91it/s]Loading weights:  39%|███▊      | 290/750 [00:05<00:10, 44.54it/s]Loading weights:  40%|████      | 301/750 [00:06<00:10, 41.52it/s]Loading weights:  42%|████▏     | 312/750 [00:06<00:11, 39.72it/s]Loading weights:  43%|████▎     | 323/750 [00:06<00:09, 43.55it/s]Loading weights:  45%|████▍     | 334/750 [00:06<00:08, 46.26it/s]Loading weights:  46%|████▌     | 345/750 [00:07<00:09, 42.86it/s]Loading weights:  47%|████▋     | 356/750 [00:07<00:09, 41.01it/s]Loading weights:  49%|████▉     | 367/750 [00:07<00:08, 43.77it/s]Loading weights:  50%|█████     | 378/750 [00:07<00:07, 47.19it/s]Loading weights:  52%|█████▏    | 389/750 [00:08<00:08, 43.86it/s]Loading weights:  56%|█████▌    | 417/750 [00:08<00:04, 75.44it/s]Loading weights:  59%|█████▉    | 441/750 [00:08<00:03, 91.40it/s]Loading weights:  62%|██████▏   | 463/750 [00:08<00:02, 113.84it/s]Loading weights:  64%|██████▍   | 479/750 [00:08<00:02, 122.74it/s]Loading weights:  66%|██████▌   | 494/750 [00:08<00:02, 124.66it/s]Loading weights:  68%|██████▊   | 511/750 [00:09<00:01, 134.55it/s]Loading weights:  70%|███████   | 526/750 [00:09<00:01, 115.18it/s]Loading weights:  72%|███████▏  | 539/750 [00:09<00:01, 114.92it/s]Loading weights:  75%|███████▍  | 561/750 [00:09<00:01, 139.50it/s]Loading weights:  77%|███████▋  | 577/750 [00:09<00:01, 144.56it/s]Loading weights:  80%|████████  | 600/750 [00:09<00:00, 167.28it/s]Loading weights:  82%|████████▏ | 618/750 [00:09<00:00, 170.50it/s]Loading weights:  85%|████████▍ | 636/750 [00:09<00:00, 140.02it/s]Loading weights:  89%|████████▉ | 667/750 [00:10<00:00, 172.04it/s]Loading weights:  93%|█████████▎| 701/750 [00:10<00:00, 180.55it/s]Loading weights:  97%|█████████▋| 725/750 [00:10<00:00, 188.83it/s]Loading weights:  99%|█████████▉| 745/750 [00:10<00:00, 187.91it/s]Loading weights: 100%|██████████| 750/750 [00:10<00:00, 71.55it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=130 rounds=52 tau=2.50 proposed/round=2.00 spec_tpot=50.9ms base_tpot=41.6ms lossless=True
+[02] new=128 rounds=52 tau=2.46 proposed/round=2.00 spec_tpot=39.3ms base_tpot=36.9ms lossless=True
+[03] new=130 rounds=56 tau=2.32 proposed/round=2.00 spec_tpot=50.0ms base_tpot=37.9ms lossless=True
+[04] new=128 rounds=54 tau=2.37 proposed/round=2.00 spec_tpot=40.1ms base_tpot=36.5ms lossless=True
+[05] new=129 rounds=51 tau=2.53 proposed/round=2.00 spec_tpot=51.0ms base_tpot=41.0ms lossless=True
+[06] new=129 rounds=49 tau=2.63 proposed/round=2.00 spec_tpot=49.6ms base_tpot=46.3ms lossless=True
+[07] new=129 rounds=51 tau=2.53 proposed/round=2.00 spec_tpot=39.9ms base_tpot=43.3ms lossless=True
+[08] new=130 rounds=50 tau=2.60 proposed/round=2.00 spec_tpot=36.9ms base_tpot=35.9ms lossless=True
+[09] new=130 rounds=57 tau=2.28 proposed/round=2.00 spec_tpot=49.3ms base_tpot=45.5ms lossless=True
+[10] new=129 rounds=55 tau=2.35 proposed/round=2.00 spec_tpot=57.3ms base_tpot=44.4ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=6 num_steps(depth)=2 max_tree_nodes=300
+total_new_tokens=1292 total_rounds=527
+accepted_tokens=1292 proposed_draft_tokens=1054
+tau(accept_length)=2.452 proposed/round=2.000
+tree_nodes/round=42.00 (verify 实际算了这么多节点)
+ms/round=113.84
+spec:   TPOT=46.43ms  throughput=21.54 tok/s  wall=59.99s
+baseline: TPOT=40.92ms  throughput=24.44 tok/s  wall=52.38s
+speedup=0.88x  lossless(all)=True
+=============================================================
+=== [A] depth=2 topk=8 budget=300 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   2%|▏         | 17/750 [00:00<00:08, 90.93it/s]Loading weights:   4%|▎         | 27/750 [00:00<00:07, 94.33it/s]Loading weights:   5%|▍         | 37/750 [00:00<00:10, 68.39it/s]Loading weights:   6%|▋         | 48/750 [00:00<00:11, 62.05it/s]Loading weights:   8%|▊         | 59/750 [00:00<00:13, 51.01it/s]Loading weights:   9%|▉         | 67/750 [00:01<00:12, 56.42it/s]Loading weights:  10%|▉         | 74/750 [00:01<00:11, 57.77it/s]Loading weights:  11%|█         | 81/750 [00:01<00:13, 49.73it/s]Loading weights:  12%|█▏        | 89/750 [00:01<00:11, 55.83it/s]Loading weights:  13%|█▎        | 96/750 [00:01<00:13, 47.50it/s]Loading weights:  14%|█▍        | 104/750 [00:01<00:13, 46.49it/s]Loading weights:  15%|█▍        | 111/750 [00:01<00:12, 50.81it/s]Loading weights:  16%|█▌        | 117/750 [00:02<00:12, 52.06it/s]Loading weights:  17%|█▋        | 125/750 [00:02<00:16, 38.94it/s]Loading weights:  18%|█▊        | 136/750 [00:02<00:15, 38.94it/s]Loading weights:  20%|█▉        | 147/750 [00:02<00:14, 42.97it/s]Loading weights:  20%|██        | 152/750 [00:02<00:13, 44.07it/s]Loading weights:  21%|██        | 158/750 [00:03<00:14, 39.94it/s]Loading weights:  23%|██▎       | 169/750 [00:03<00:15, 38.66it/s]Loading weights:  24%|██▍       | 180/750 [00:03<00:13, 42.82it/s]Loading weights:  25%|██▌       | 191/750 [00:03<00:13, 41.07it/s]Loading weights:  27%|██▋       | 202/750 [00:04<00:15, 35.59it/s]Loading weights:  28%|██▊       | 213/750 [00:04<00:11, 45.33it/s]Loading weights:  29%|██▉       | 219/750 [00:04<00:11, 46.44it/s]Loading weights:  30%|███       | 225/750 [00:04<00:14, 36.16it/s]Loading weights:  31%|███▏      | 235/750 [00:05<00:14, 35.69it/s]Loading weights:  32%|███▏      | 243/750 [00:05<00:12, 41.81it/s]Loading weights:  33%|███▎      | 249/750 [00:05<00:11, 44.86it/s]Loading weights:  34%|███▍      | 257/750 [00:05<00:11, 42.94it/s]Loading weights:  36%|███▌      | 268/750 [00:05<00:11, 40.39it/s]Loading weights:  37%|███▋      | 279/750 [00:06<00:11, 39.62it/s]Loading weights:  39%|███▊      | 290/750 [00:06<00:11, 38.52it/s]Loading weights:  40%|████      | 301/750 [00:06<00:11, 37.77it/s]Loading weights:  42%|████▏     | 312/750 [00:06<00:10, 41.27it/s]Loading weights:  43%|████▎     | 323/750 [00:07<00:10, 39.69it/s]Loading weights:  45%|████▍     | 334/750 [00:07<00:09, 43.57it/s]Loading weights:  46%|████▌     | 345/750 [00:07<00:09, 41.88it/s]Loading weights:  47%|████▋     | 350/750 [00:07<00:09, 42.39it/s]Loading weights:  47%|████▋     | 356/750 [00:08<00:10, 38.72it/s]Loading weights:  49%|████▊     | 364/750 [00:08<00:08, 45.69it/s]Loading weights:  49%|████▉     | 370/750 [00:08<00:08, 47.07it/s]Loading weights:  50%|█████     | 378/750 [00:08<00:09, 39.49it/s]Loading weights:  52%|█████▏    | 389/750 [00:08<00:08, 43.27it/s]Loading weights:  55%|█████▌    | 415/750 [00:08<00:04, 71.05it/s]Loading weights:  59%|█████▉    | 446/750 [00:09<00:02, 110.57it/s]Loading weights:  62%|██████▏   | 462/750 [00:09<00:02, 120.44it/s]Loading weights:  64%|██████▎   | 477/750 [00:09<00:02, 106.79it/s]Loading weights:  68%|██████▊   | 511/750 [00:09<00:01, 155.80it/s]Loading weights:  72%|███████▏  | 538/750 [00:09<00:01, 181.65it/s]Loading weights:  76%|███████▋  | 573/750 [00:09<00:00, 223.13it/s]Loading weights:  80%|███████▉  | 599/750 [00:09<00:00, 230.45it/s]Loading weights:  84%|████████▍ | 633/750 [00:09<00:00, 256.72it/s]Loading weights:  89%|████████▊ | 665/750 [00:09<00:00, 272.61it/s]Loading weights:  93%|█████████▎| 694/750 [00:10<00:00, 217.74it/s]Loading weights:  97%|█████████▋| 725/750 [00:10<00:00, 195.09it/s]Loading weights: 100%|█████████▉| 747/750 [00:10<00:00, 164.03it/s]Loading weights: 100%|██████████| 750/750 [00:10<00:00, 70.78it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=130 rounds=50 tau=2.60 proposed/round=2.00 spec_tpot=56.9ms base_tpot=40.2ms lossless=True
+[02] new=128 rounds=51 tau=2.51 proposed/round=2.00 spec_tpot=57.4ms base_tpot=43.4ms lossless=True
+[03] new=130 rounds=54 tau=2.41 proposed/round=2.00 spec_tpot=55.2ms base_tpot=52.6ms lossless=True
+[04] new=128 rounds=52 tau=2.46 proposed/round=2.00 spec_tpot=50.9ms base_tpot=48.0ms lossless=True
+[05] new=129 rounds=50 tau=2.58 proposed/round=2.00 spec_tpot=45.2ms base_tpot=42.9ms lossless=True
+[06] new=129 rounds=48 tau=2.69 proposed/round=2.00 spec_tpot=37.8ms base_tpot=33.8ms lossless=True
+[07] new=129 rounds=51 tau=2.53 proposed/round=2.00 spec_tpot=38.9ms base_tpot=35.8ms lossless=True
+[08] new=130 rounds=49 tau=2.65 proposed/round=2.00 spec_tpot=38.3ms base_tpot=34.3ms lossless=True
+[09] new=130 rounds=56 tau=2.32 proposed/round=2.00 spec_tpot=53.1ms base_tpot=46.1ms lossless=True
+[10] new=129 rounds=54 tau=2.39 proposed/round=2.00 spec_tpot=62.5ms base_tpot=42.3ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=8 num_steps(depth)=2 max_tree_nodes=300
+total_new_tokens=1292 total_rounds=515
+accepted_tokens=1292 proposed_draft_tokens=1030
+tau(accept_length)=2.509 proposed/round=2.000
+tree_nodes/round=72.00 (verify 实际算了这么多节点)
+ms/round=124.46
+spec:   TPOT=49.61ms  throughput=20.16 tok/s  wall=64.10s
+baseline: TPOT=41.94ms  throughput=23.84 tok/s  wall=53.69s
+speedup=0.85x  lossless(all)=True
+=============================================================
+=== [A] depth=2 topk=12 budget=300 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   2%|▏         | 15/750 [00:00<00:07, 91.91it/s]Loading weights:   3%|▎         | 26/750 [00:00<00:10, 68.99it/s]Loading weights:   5%|▍         | 37/750 [00:00<00:11, 61.53it/s]Loading weights:   6%|▋         | 48/750 [00:00<00:11, 58.94it/s]Loading weights:   8%|▊         | 57/750 [00:00<00:10, 65.05it/s]Loading weights:   9%|▊         | 64/750 [00:01<00:12, 54.33it/s]Loading weights:   9%|▉         | 70/750 [00:01<00:15, 44.01it/s]Loading weights:  11%|█         | 81/750 [00:01<00:18, 36.64it/s]Loading weights:  12%|█▏        | 92/750 [00:01<00:16, 40.82it/s]Loading weights:  14%|█▎        | 103/750 [00:02<00:14, 44.65it/s]Loading weights:  15%|█▌        | 114/750 [00:02<00:14, 42.53it/s]Loading weights:  17%|█▋        | 125/750 [00:02<00:12, 51.44it/s]Loading weights:  17%|█▋        | 131/750 [00:02<00:11, 52.26it/s]Loading weights:  18%|█▊        | 137/750 [00:02<00:17, 34.67it/s]Loading weights:  20%|█▉        | 147/750 [00:03<00:17, 34.36it/s]Loading weights:  21%|██        | 158/750 [00:03<00:16, 35.18it/s]Loading weights:  22%|██▏       | 166/750 [00:03<00:14, 40.49it/s]Loading weights:  23%|██▎       | 171/750 [00:03<00:14, 39.96it/s]Loading weights:  24%|██▍       | 180/750 [00:03<00:13, 42.98it/s]Loading weights:  25%|██▌       | 191/750 [00:04<00:13, 41.78it/s]Loading weights:  27%|██▋       | 202/750 [00:04<00:12, 44.61it/s]Loading weights:  28%|██▊       | 213/750 [00:04<00:11, 47.62it/s]Loading weights:  30%|██▉       | 224/750 [00:04<00:11, 44.00it/s]Loading weights:  31%|███▏      | 235/750 [00:05<00:10, 46.82it/s]Loading weights:  33%|███▎      | 246/750 [00:05<00:11, 43.31it/s]Loading weights:  34%|███▍      | 257/750 [00:05<00:10, 46.05it/s]Loading weights:  36%|███▌      | 268/750 [00:05<00:09, 48.20it/s]Loading weights:  37%|███▋      | 279/750 [00:06<00:09, 50.91it/s]Loading weights:  39%|███▊      | 290/750 [00:06<00:10, 45.58it/s]Loading weights:  40%|████      | 301/750 [00:06<00:09, 47.07it/s]Loading weights:  42%|████▏     | 312/750 [00:06<00:08, 48.73it/s]Loading weights:  43%|████▎     | 323/750 [00:06<00:08, 52.08it/s]Loading weights:  44%|████▍     | 329/750 [00:07<00:08, 52.15it/s]Loading weights:  45%|████▍     | 335/750 [00:07<00:09, 44.99it/s]Loading weights:  46%|████▌     | 345/750 [00:07<00:09, 40.71it/s]Loading weights:  47%|████▋     | 356/750 [00:07<00:08, 44.42it/s]Loading weights:  49%|████▉     | 367/750 [00:07<00:08, 47.07it/s]Loading weights:  50%|█████     | 378/750 [00:08<00:08, 43.73it/s]Loading weights:  52%|█████▏    | 389/750 [00:08<00:07, 46.50it/s]Loading weights:  55%|█████▌    | 415/750 [00:08<00:04, 80.47it/s]Loading weights:  60%|██████    | 451/750 [00:08<00:02, 131.70it/s]Loading weights:  64%|██████▍   | 481/750 [00:08<00:01, 138.01it/s]Loading weights:  69%|██████▉   | 519/750 [00:08<00:01, 183.19it/s]Loading weights:  72%|███████▏  | 542/750 [00:09<00:01, 159.55it/s]Loading weights:  79%|███████▉  | 591/750 [00:09<00:00, 227.01it/s]Loading weights:  83%|████████▎ | 620/750 [00:09<00:00, 198.33it/s]Loading weights:  89%|████████▉ | 669/750 [00:09<00:00, 258.04it/s]Loading weights:  95%|█████████▌| 713/750 [00:09<00:00, 252.05it/s]Loading weights:  99%|█████████▉| 743/750 [00:09<00:00, 212.03it/s]Loading weights: 100%|██████████| 750/750 [00:09<00:00, 75.17it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=128 rounds=48 tau=2.67 proposed/round=2.00 spec_tpot=56.8ms base_tpot=39.8ms lossless=True
+[02] new=128 rounds=49 tau=2.61 proposed/round=2.00 spec_tpot=55.8ms base_tpot=38.3ms lossless=True
+[03] new=130 rounds=51 tau=2.55 proposed/round=2.00 spec_tpot=50.3ms base_tpot=47.0ms lossless=True
+[04] new=128 rounds=52 tau=2.46 proposed/round=2.00 spec_tpot=73.0ms base_tpot=53.6ms lossless=True
+[05] new=130 rounds=48 tau=2.71 proposed/round=2.00 spec_tpot=59.4ms base_tpot=45.5ms lossless=True
+[06] new=129 rounds=48 tau=2.69 proposed/round=2.00 spec_tpot=60.3ms base_tpot=45.2ms lossless=True
+[07] new=129 rounds=51 tau=2.53 proposed/round=2.00 spec_tpot=60.9ms base_tpot=45.2ms lossless=True
+[08] new=130 rounds=49 tau=2.65 proposed/round=2.00 spec_tpot=46.9ms base_tpot=40.4ms lossless=True
+[09] new=130 rounds=55 tau=2.36 proposed/round=2.00 spec_tpot=61.0ms base_tpot=54.3ms lossless=True
+[10] new=129 rounds=53 tau=2.43 proposed/round=2.00 spec_tpot=77.9ms base_tpot=53.9ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=12 num_steps(depth)=2 max_tree_nodes=300
+total_new_tokens=1291 total_rounds=504
+accepted_tokens=1291 proposed_draft_tokens=1008
+tau(accept_length)=2.562 proposed/round=2.000
+tree_nodes/round=156.00 (verify 实际算了这么多节点)
+ms/round=154.20
+spec:   TPOT=60.20ms  throughput=16.61 tok/s  wall=77.72s
+baseline: TPOT=46.32ms  throughput=21.59 tok/s  wall=59.29s
+speedup=0.77x  lossless(all)=True
+=============================================================
+=== [A] depth=2 topk=16 budget=300 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   4%|▎         | 28/750 [00:00<00:04, 163.12it/s]Loading weights:   6%|▌         | 45/750 [00:00<00:08, 85.31it/s] Loading weights:   7%|▋         | 55/750 [00:00<00:09, 71.69it/s]Loading weights:   8%|▊         | 63/750 [00:00<00:11, 57.79it/s]Loading weights:  10%|█         | 78/750 [00:01<00:10, 65.28it/s]Loading weights:  11%|█▏        | 85/750 [00:01<00:12, 55.32it/s]Loading weights:  12%|█▏        | 92/750 [00:01<00:13, 50.13it/s]Loading weights:  13%|█▎        | 100/750 [00:01<00:11, 54.50it/s]Loading weights:  14%|█▍        | 106/750 [00:01<00:13, 46.33it/s]Loading weights:  15%|█▌        | 114/750 [00:01<00:14, 42.86it/s]Loading weights:  17%|█▋        | 124/750 [00:02<00:11, 53.55it/s]Loading weights:  17%|█▋        | 131/750 [00:02<00:13, 45.05it/s]Loading weights:  18%|█▊        | 137/750 [00:02<00:14, 42.82it/s]Loading weights:  20%|█▉        | 147/750 [00:02<00:13, 44.22it/s]Loading weights:  21%|██        | 158/750 [00:02<00:14, 41.76it/s]Loading weights:  23%|██▎       | 169/750 [00:03<00:12, 45.04it/s]Loading weights:  24%|██▍       | 180/750 [00:03<00:11, 48.53it/s]Loading weights:  25%|██▍       | 186/750 [00:03<00:13, 43.33it/s]Loading weights:  25%|██▌       | 191/750 [00:03<00:13, 42.75it/s]Loading weights:  27%|██▋       | 202/750 [00:03<00:11, 48.27it/s]Loading weights:  28%|██▊       | 207/750 [00:03<00:11, 47.07it/s]Loading weights:  28%|██▊       | 213/750 [00:04<00:12, 42.77it/s]Loading weights:  30%|██▉       | 224/750 [00:04<00:11, 45.95it/s]Loading weights:  31%|███       | 232/750 [00:04<00:09, 52.19it/s]Loading weights:  32%|███▏      | 238/750 [00:04<00:11, 45.98it/s]Loading weights:  33%|███▎      | 246/750 [00:04<00:11, 43.09it/s]Loading weights:  34%|███▍      | 257/750 [00:05<00:10, 46.77it/s]Loading weights:  36%|███▌      | 268/750 [00:05<00:09, 50.02it/s]Loading weights:  37%|███▋      | 277/750 [00:05<00:08, 57.32it/s]Loading weights:  38%|███▊      | 284/750 [00:05<00:09, 49.32it/s]Loading weights:  39%|███▊      | 290/750 [00:05<00:10, 42.21it/s]Loading weights:  40%|███▉      | 298/750 [00:05<00:10, 42.30it/s]Loading weights:  40%|████      | 303/750 [00:06<00:10, 43.27it/s]Loading weights:  42%|████▏     | 312/750 [00:06<00:11, 37.22it/s]Loading weights:  43%|████▎     | 324/750 [00:06<00:09, 43.31it/s]Loading weights:  44%|████▍     | 329/750 [00:06<00:09, 44.30it/s]Loading weights:  45%|████▍     | 336/750 [00:06<00:08, 49.22it/s]Loading weights:  46%|████▌     | 346/750 [00:06<00:07, 50.58it/s]Loading weights:  47%|████▋     | 356/750 [00:07<00:07, 50.60it/s]Loading weights:  48%|████▊     | 362/750 [00:07<00:07, 51.97it/s]Loading weights:  49%|████▉     | 368/750 [00:07<00:10, 36.28it/s]Loading weights:  50%|█████     | 378/750 [00:07<00:09, 41.03it/s]Loading weights:  52%|█████▏    | 389/750 [00:08<00:08, 44.86it/s]Loading weights:  54%|█████▍    | 405/750 [00:08<00:06, 55.03it/s]Loading weights:  57%|█████▋    | 431/750 [00:08<00:03, 82.62it/s]Loading weights:  61%|██████    | 455/750 [00:08<00:02, 111.76it/s]Loading weights:  64%|██████▍   | 479/750 [00:08<00:02, 131.34it/s]Loading weights:  69%|██████▊   | 514/750 [00:08<00:01, 152.79it/s]Loading weights:  71%|███████   | 531/750 [00:08<00:01, 149.51it/s]Loading weights:  78%|███████▊  | 584/750 [00:09<00:00, 202.96it/s]Loading weights:  81%|████████  | 605/750 [00:09<00:00, 196.03it/s]Loading weights:  83%|████████▎ | 625/750 [00:09<00:00, 190.03it/s]Loading weights:  86%|████████▌ | 645/750 [00:09<00:00, 192.40it/s]Loading weights:  89%|████████▉ | 667/750 [00:09<00:00, 136.61it/s]Loading weights:  94%|█████████▎| 703/750 [00:09<00:00, 173.61it/s]Loading weights:  97%|█████████▋| 725/750 [00:09<00:00, 157.89it/s]Loading weights:  99%|█████████▉| 743/750 [00:10<00:00, 138.07it/s]Loading weights: 100%|██████████| 750/750 [00:10<00:00, 73.65it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=128 rounds=48 tau=2.67 proposed/round=2.00 spec_tpot=66.5ms base_tpot=53.3ms lossless=True
+[02] new=128 rounds=48 tau=2.67 proposed/round=2.00 spec_tpot=62.7ms base_tpot=46.1ms lossless=True
+[03] new=130 rounds=49 tau=2.65 proposed/round=2.00 spec_tpot=73.0ms base_tpot=41.4ms lossless=True
+[04] new=128 rounds=51 tau=2.51 proposed/round=2.00 spec_tpot=58.2ms base_tpot=43.5ms lossless=True
+[05] new=130 rounds=47 tau=2.77 proposed/round=2.00 spec_tpot=55.3ms base_tpot=49.0ms lossless=True
+[06] new=129 rounds=46 tau=2.80 proposed/round=2.00 spec_tpot=62.8ms base_tpot=45.6ms lossless=True
+[07] new=129 rounds=49 tau=2.63 proposed/round=2.00 spec_tpot=65.4ms base_tpot=44.7ms lossless=True
+[08] new=130 rounds=46 tau=2.83 proposed/round=2.00 spec_tpot=62.9ms base_tpot=49.1ms lossless=True
+[09] new=130 rounds=55 tau=2.36 proposed/round=2.00 spec_tpot=63.0ms base_tpot=36.4ms lossless=True
+[10] new=129 rounds=53 tau=2.43 proposed/round=2.00 spec_tpot=70.0ms base_tpot=50.3ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=16 num_steps(depth)=2 max_tree_nodes=300
+total_new_tokens=1291 total_rounds=492
+accepted_tokens=1291 proposed_draft_tokens=984
+tau(accept_length)=2.624 proposed/round=2.000
+tree_nodes/round=272.00 (verify 实际算了这么多节点)
+ms/round=167.88
+spec:   TPOT=63.98ms  throughput=15.63 tok/s  wall=82.59s
+baseline: TPOT=45.95ms  throughput=21.76 tok/s  wall=58.81s
+speedup=0.72x  lossless(all)=True
+=============================================================
+=== [B] depth=1 topk=2 budget=200 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   2%|▏         | 17/750 [00:00<00:08, 87.90it/s]Loading weights:   3%|▎         | 26/750 [00:00<00:08, 86.85it/s]Loading weights:   5%|▍         | 37/750 [00:00<00:12, 55.05it/s]Loading weights:   6%|▋         | 48/750 [00:00<00:15, 46.52it/s]Loading weights:   8%|▊         | 59/750 [00:01<00:14, 48.71it/s]Loading weights:   9%|▉         | 70/750 [00:01<00:13, 50.29it/s]Loading weights:  11%|█         | 81/750 [00:01<00:14, 45.33it/s]Loading weights:  12%|█▏        | 92/750 [00:01<00:13, 48.25it/s]Loading weights:  14%|█▎        | 103/750 [00:02<00:14, 44.07it/s]Loading weights:  15%|█▌        | 114/750 [00:02<00:11, 53.67it/s]Loading weights:  16%|█▌        | 121/750 [00:02<00:11, 55.92it/s]Loading weights:  17%|█▋        | 128/750 [00:02<00:14, 42.76it/s]Loading weights:  18%|█▊        | 136/750 [00:02<00:14, 41.63it/s]Loading weights:  20%|█▉        | 147/750 [00:03<00:15, 39.95it/s]Loading weights:  21%|██        | 156/750 [00:03<00:12, 47.25it/s]Loading weights:  22%|██▏       | 162/750 [00:03<00:16, 35.95it/s]Loading weights:  23%|██▎       | 171/750 [00:03<00:14, 39.03it/s]Loading weights:  24%|██▍       | 180/750 [00:03<00:14, 40.26it/s]Loading weights:  25%|██▌       | 191/750 [00:04<00:12, 44.31it/s]Loading weights:  27%|██▋       | 202/750 [00:04<00:13, 40.47it/s]Loading weights:  28%|██▊       | 210/750 [00:04<00:12, 42.20it/s]Loading weights:  29%|██▊       | 215/750 [00:04<00:12, 42.72it/s]Loading weights:  29%|██▉       | 221/750 [00:04<00:11, 45.69it/s]Loading weights:  30%|███       | 226/750 [00:04<00:13, 38.85it/s]Loading weights:  31%|███▏      | 235/750 [00:05<00:10, 47.95it/s]Loading weights:  32%|███▏      | 241/750 [00:05<00:11, 42.45it/s]Loading weights:  33%|███▎      | 246/750 [00:05<00:13, 36.86it/s]Loading weights:  34%|███▍      | 257/750 [00:05<00:11, 42.29it/s]Loading weights:  36%|███▌      | 268/750 [00:05<00:08, 53.91it/s]Loading weights:  37%|███▋      | 279/750 [00:06<00:10, 46.84it/s]Loading weights:  39%|███▊      | 290/750 [00:06<00:09, 50.04it/s]Loading weights:  40%|████      | 301/750 [00:06<00:07, 60.02it/s]Loading weights:  42%|████▏     | 312/750 [00:06<00:08, 50.56it/s]Loading weights:  43%|████▎     | 323/750 [00:06<00:08, 50.90it/s]Loading weights:  45%|████▍     | 334/750 [00:07<00:07, 52.19it/s]Loading weights:  46%|████▌     | 345/750 [00:07<00:08, 46.08it/s]Loading weights:  47%|████▋     | 356/750 [00:07<00:08, 48.74it/s]Loading weights:  49%|████▉     | 367/750 [00:07<00:07, 50.22it/s]Loading weights:  50%|█████     | 378/750 [00:08<00:08, 45.36it/s]Loading weights:  52%|█████▏    | 389/750 [00:08<00:08, 42.93it/s]Loading weights:  57%|█████▋    | 428/750 [00:08<00:03, 92.80it/s]Loading weights:  61%|██████    | 455/750 [00:08<00:02, 122.77it/s]Loading weights:  65%|██████▌   | 489/750 [00:08<00:01, 162.74it/s]Loading weights:  71%|███████   | 530/750 [00:08<00:01, 215.71it/s]Loading weights:  74%|███████▍  | 558/750 [00:08<00:00, 229.06it/s]Loading weights:  78%|███████▊  | 586/750 [00:09<00:00, 188.78it/s]Loading weights:  86%|████████▌ | 643/750 [00:09<00:00, 233.09it/s]Loading weights:  91%|█████████ | 683/750 [00:09<00:00, 268.19it/s]Loading weights:  96%|█████████▌| 719/750 [00:09<00:00, 289.32it/s]Loading weights: 100%|██████████| 750/750 [00:09<00:00, 76.52it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=129 rounds=72 tau=1.79 proposed/round=1.00 spec_tpot=45.8ms base_tpot=35.1ms lossless=True
+[02] new=128 rounds=74 tau=1.73 proposed/round=1.00 spec_tpot=47.8ms base_tpot=35.0ms lossless=True
+[03] new=128 rounds=77 tau=1.66 proposed/round=1.00 spec_tpot=47.7ms base_tpot=33.3ms lossless=True
+[04] new=128 rounds=74 tau=1.73 proposed/round=1.00 spec_tpot=45.4ms base_tpot=35.1ms lossless=True
+[05] new=129 rounds=70 tau=1.84 proposed/round=1.00 spec_tpot=42.4ms base_tpot=33.7ms lossless=True
+[06] new=129 rounds=70 tau=1.84 proposed/round=1.00 spec_tpot=41.4ms base_tpot=33.3ms lossless=True
+[07] new=128 rounds=77 tau=1.66 proposed/round=1.00 spec_tpot=46.5ms base_tpot=33.2ms lossless=True
+[08] new=129 rounds=73 tau=1.77 proposed/round=1.00 spec_tpot=44.8ms base_tpot=34.9ms lossless=True
+[09] new=128 rounds=74 tau=1.73 proposed/round=1.00 spec_tpot=46.9ms base_tpot=33.2ms lossless=True
+[10] new=129 rounds=75 tau=1.72 proposed/round=1.00 spec_tpot=46.2ms base_tpot=33.5ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=2 num_steps(depth)=1 max_tree_nodes=200
+total_new_tokens=1285 total_rounds=736
+accepted_tokens=1285 proposed_draft_tokens=736
+tau(accept_length)=1.746 proposed/round=1.000
+tree_nodes/round=2.00 (verify 实际算了这么多节点)
+ms/round=79.42
+spec:   TPOT=45.49ms  throughput=21.98 tok/s  wall=58.45s
+baseline: TPOT=34.03ms  throughput=29.38 tok/s  wall=43.56s
+speedup=0.75x  lossless(all)=True
+=============================================================
+=== [B] depth=2 topk=2 budget=200 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   2%|▏         | 17/750 [00:00<00:07, 100.53it/s]Loading weights:   4%|▎         | 28/750 [00:00<00:09, 74.51it/s] Loading weights:   5%|▍         | 37/750 [00:00<00:12, 59.22it/s]Loading weights:   6%|▋         | 48/750 [00:00<00:14, 48.33it/s]Loading weights:   8%|▊         | 57/750 [00:01<00:14, 47.88it/s]Loading weights:   8%|▊         | 62/750 [00:01<00:14, 48.26it/s]Loading weights:   9%|▉         | 70/750 [00:01<00:15, 45.17it/s]Loading weights:  11%|█         | 81/750 [00:01<00:14, 47.32it/s]Loading weights:  12%|█▏        | 92/750 [00:01<00:15, 43.48it/s]Loading weights:  14%|█▎        | 103/750 [00:02<00:14, 46.09it/s]Loading weights:  15%|█▌        | 113/750 [00:02<00:11, 55.07it/s]Loading weights:  16%|█▌        | 120/750 [00:02<00:14, 42.06it/s]Loading weights:  17%|█▋        | 126/750 [00:02<00:16, 38.43it/s]Loading weights:  18%|█▊        | 136/750 [00:02<00:16, 36.17it/s]Loading weights:  20%|█▉        | 147/750 [00:03<00:16, 37.32it/s]Loading weights:  21%|██        | 158/750 [00:03<00:14, 41.21it/s]Loading weights:  23%|██▎       | 169/750 [00:03<00:16, 35.17it/s]Loading weights:  24%|██▍       | 180/750 [00:04<00:15, 36.29it/s]Loading weights:  25%|██▌       | 191/750 [00:04<00:15, 36.17it/s]Loading weights:  27%|██▋       | 202/750 [00:04<00:15, 36.53it/s]Loading weights:  28%|██▊       | 213/750 [00:05<00:14, 36.71it/s]Loading weights:  30%|██▉       | 224/750 [00:05<00:13, 40.25it/s]Loading weights:  31%|███▏      | 235/750 [00:05<00:12, 39.64it/s]Loading weights:  33%|███▎      | 246/750 [00:05<00:11, 42.68it/s]Loading weights:  34%|███▍      | 257/750 [00:06<00:12, 40.91it/s]Loading weights:  36%|███▌      | 268/750 [00:06<00:12, 39.80it/s]Loading weights:  36%|███▋      | 273/750 [00:06<00:11, 41.14it/s]Loading weights:  37%|███▋      | 280/750 [00:06<00:11, 39.27it/s]Loading weights:  39%|███▊      | 290/750 [00:06<00:10, 42.68it/s]Loading weights:  40%|████      | 301/750 [00:07<00:09, 45.58it/s]Loading weights:  41%|████      | 309/750 [00:07<00:08, 51.29it/s]Loading weights:  42%|████▏     | 315/750 [00:07<00:09, 44.08it/s]Loading weights:  43%|████▎     | 323/750 [00:07<00:11, 37.67it/s]Loading weights:  45%|████▍     | 334/750 [00:07<00:11, 37.33it/s]Loading weights:  46%|████▌     | 345/750 [00:08<00:09, 41.84it/s]Loading weights:  47%|████▋     | 356/750 [00:08<00:08, 45.34it/s]Loading weights:  49%|████▉     | 367/750 [00:08<00:08, 47.53it/s]Loading weights:  50%|█████     | 378/750 [00:08<00:08, 44.14it/s]Loading weights:  51%|█████▏    | 386/750 [00:08<00:07, 48.14it/s]Loading weights:  53%|█████▎    | 397/750 [00:09<00:07, 49.01it/s]Loading weights:  59%|█████▉    | 441/750 [00:09<00:02, 103.68it/s]Loading weights:  62%|██████▏   | 467/750 [00:09<00:02, 131.75it/s]Loading weights:  64%|██████▍   | 483/750 [00:09<00:01, 137.02it/s]Loading weights:  67%|██████▋   | 499/750 [00:09<00:01, 141.19it/s]Loading weights:  70%|███████   | 525/750 [00:09<00:01, 169.54it/s]Loading weights:  74%|███████▎  | 553/750 [00:09<00:01, 196.90it/s]Loading weights:  77%|███████▋  | 575/750 [00:10<00:01, 155.18it/s]Loading weights:  81%|████████▏ | 610/750 [00:10<00:00, 171.67it/s]Loading weights:  85%|████████▍ | 635/750 [00:10<00:00, 188.55it/s]Loading weights:  89%|████████▉ | 668/750 [00:10<00:00, 222.03it/s]Loading weights:  93%|█████████▎| 701/750 [00:10<00:00, 248.72it/s]Loading weights:  97%|█████████▋| 728/750 [00:10<00:00, 195.67it/s]Loading weights: 100%|██████████| 750/750 [00:10<00:00, 69.00it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=130 rounds=57 tau=2.28 proposed/round=2.00 spec_tpot=53.9ms base_tpot=44.7ms lossless=True
+[02] new=128 rounds=59 tau=2.17 proposed/round=2.00 spec_tpot=57.5ms base_tpot=50.8ms lossless=True
+[03] new=128 rounds=63 tau=2.03 proposed/round=2.00 spec_tpot=64.6ms base_tpot=46.0ms lossless=True
+[04] new=128 rounds=60 tau=2.13 proposed/round=2.00 spec_tpot=41.3ms base_tpot=46.8ms lossless=True
+[05] new=129 rounds=56 tau=2.30 proposed/round=2.00 spec_tpot=48.6ms base_tpot=45.5ms lossless=True
+[06] new=130 rounds=56 tau=2.32 proposed/round=2.00 spec_tpot=43.4ms base_tpot=43.9ms lossless=True
+[07] new=128 rounds=60 tau=2.13 proposed/round=2.00 spec_tpot=41.6ms base_tpot=34.1ms lossless=True
+[08] new=130 rounds=54 tau=2.41 proposed/round=2.00 spec_tpot=39.2ms base_tpot=38.0ms lossless=True
+[09] new=128 rounds=63 tau=2.03 proposed/round=2.00 spec_tpot=48.1ms base_tpot=34.2ms lossless=True
+[10] new=129 rounds=59 tau=2.19 proposed/round=2.00 spec_tpot=39.3ms base_tpot=34.9ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=2 num_steps(depth)=2 max_tree_nodes=200
+total_new_tokens=1288 total_rounds=587
+accepted_tokens=1288 proposed_draft_tokens=1174
+tau(accept_length)=2.194 proposed/round=2.000
+tree_nodes/round=6.00 (verify 实际算了这么多节点)
+ms/round=104.74
+spec:   TPOT=47.74ms  throughput=20.95 tok/s  wall=61.48s
+baseline: TPOT=41.89ms  throughput=23.87 tok/s  wall=53.62s
+speedup=0.88x  lossless(all)=True
+=============================================================
+=== [B] depth=3 topk=2 budget=200 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   3%|▎         | 26/750 [00:00<00:08, 89.69it/s]Loading weights:   5%|▍         | 37/750 [00:00<00:12, 57.22it/s]Loading weights:   6%|▋         | 48/750 [00:00<00:12, 56.59it/s]Loading weights:   8%|▊         | 59/750 [00:01<00:14, 47.93it/s]Loading weights:   9%|▉         | 70/750 [00:01<00:15, 44.30it/s]Loading weights:  11%|█         | 81/750 [00:01<00:14, 47.39it/s]Loading weights:  12%|█▏        | 92/750 [00:01<00:13, 49.06it/s]Loading weights:  14%|█▎        | 103/750 [00:01<00:12, 50.13it/s]Loading weights:  15%|█▌        | 114/750 [00:02<00:13, 46.05it/s]Loading weights:  17%|█▋        | 125/750 [00:02<00:13, 47.16it/s]Loading weights:  18%|█▊        | 136/750 [00:02<00:13, 44.24it/s]Loading weights:  20%|█▉        | 147/750 [00:02<00:12, 47.13it/s]Loading weights:  21%|██        | 155/750 [00:03<00:11, 52.24it/s]Loading weights:  21%|██▏       | 161/750 [00:03<00:12, 45.59it/s]Loading weights:  23%|██▎       | 169/750 [00:03<00:13, 43.64it/s]Loading weights:  24%|██▍       | 180/750 [00:03<00:13, 40.99it/s]Loading weights:  25%|██▌       | 191/750 [00:03<00:12, 43.72it/s]Loading weights:  27%|██▋       | 202/750 [00:04<00:11, 47.33it/s]Loading weights:  28%|██▊       | 213/750 [00:04<00:10, 50.30it/s]Loading weights:  29%|██▉       | 221/750 [00:04<00:09, 54.78it/s]Loading weights:  30%|███       | 227/750 [00:04<00:09, 53.20it/s]Loading weights:  31%|███       | 233/750 [00:04<00:10, 47.49it/s]Loading weights:  32%|███▏      | 238/750 [00:04<00:10, 46.60it/s]Loading weights:  32%|███▏      | 243/750 [00:05<00:13, 38.50it/s]Loading weights:  34%|███▍      | 254/750 [00:05<00:10, 45.40it/s]Loading weights:  35%|███▍      | 259/750 [00:05<00:10, 45.09it/s]Loading weights:  36%|███▌      | 268/750 [00:05<00:15, 31.48it/s]Loading weights:  37%|███▋      | 279/750 [00:06<00:15, 30.59it/s]Loading weights:  39%|███▊      | 290/750 [00:06<00:12, 37.92it/s]Loading weights:  39%|███▉      | 295/750 [00:06<00:12, 37.89it/s]Loading weights:  40%|████      | 301/750 [00:06<00:12, 36.78it/s]Loading weights:  41%|████      | 306/750 [00:06<00:11, 38.90it/s]Loading weights:  42%|████▏     | 312/750 [00:07<00:14, 30.90it/s]Loading weights:  43%|████▎     | 323/750 [00:07<00:11, 37.23it/s]Loading weights:  45%|████▍     | 334/750 [00:07<00:09, 42.79it/s]Loading weights:  46%|████▌     | 345/750 [00:07<00:09, 41.15it/s]Loading weights:  47%|████▋     | 356/750 [00:07<00:08, 44.13it/s]Loading weights:  49%|████▉     | 367/750 [00:08<00:09, 41.57it/s]Loading weights:  50%|█████     | 376/750 [00:08<00:07, 48.49it/s]Loading weights:  51%|█████     | 382/750 [00:08<00:08, 43.53it/s]Loading weights:  52%|█████▏    | 389/750 [00:08<00:10, 35.57it/s]Loading weights:  54%|█████▍    | 407/750 [00:08<00:05, 58.09it/s]Loading weights:  59%|█████▉    | 441/750 [00:09<00:02, 108.78it/s]Loading weights:  62%|██████▏   | 468/750 [00:09<00:01, 141.94it/s]Loading weights:  65%|██████▍   | 487/750 [00:09<00:01, 149.88it/s]Loading weights:  68%|██████▊   | 509/750 [00:09<00:01, 166.80it/s]Loading weights:  71%|███████   | 529/750 [00:09<00:01, 145.84it/s]Loading weights:  75%|███████▍  | 561/750 [00:09<00:01, 185.65it/s]Loading weights:  78%|███████▊  | 585/750 [00:09<00:00, 197.27it/s]Loading weights:  81%|████████  | 607/750 [00:09<00:00, 202.50it/s]Loading weights:  84%|████████▍ | 629/750 [00:10<00:00, 198.75it/s]Loading weights:  89%|████████▊ | 665/750 [00:10<00:00, 202.11it/s]Loading weights:  92%|█████████▏| 693/750 [00:10<00:00, 218.79it/s]Loading weights:  95%|█████████▌| 716/750 [00:10<00:00, 219.08it/s]Loading weights:  99%|█████████▊| 739/750 [00:10<00:00, 176.56it/s]Loading weights: 100%|██████████| 750/750 [00:10<00:00, 70.10it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=130 rounds=51 tau=2.55 proposed/round=3.00 spec_tpot=42.0ms base_tpot=45.2ms lossless=True
+[02] new=128 rounds=50 tau=2.56 proposed/round=3.00 spec_tpot=48.3ms base_tpot=43.2ms lossless=True
+[03] new=128 rounds=55 tau=2.33 proposed/round=3.00 spec_tpot=41.3ms base_tpot=44.4ms lossless=True
+[04] new=128 rounds=57 tau=2.25 proposed/round=3.00 spec_tpot=50.6ms base_tpot=50.3ms lossless=True
+[05] new=130 rounds=50 tau=2.60 proposed/round=3.00 spec_tpot=49.2ms base_tpot=50.0ms lossless=True
+[06] new=131 rounds=47 tau=2.79 proposed/round=3.00 spec_tpot=45.7ms base_tpot=47.1ms lossless=True
+[07] new=128 rounds=53 tau=2.42 proposed/round=3.00 spec_tpot=36.2ms base_tpot=33.1ms lossless=True
+[08] new=131 rounds=46 tau=2.85 proposed/round=3.00 spec_tpot=33.6ms base_tpot=33.1ms lossless=True
+[09] new=128 rounds=56 tau=2.29 proposed/round=3.00 spec_tpot=40.4ms base_tpot=34.0ms lossless=True
+[10] new=129 rounds=51 tau=2.53 proposed/round=3.00 spec_tpot=45.3ms base_tpot=36.4ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=2 num_steps(depth)=3 max_tree_nodes=200
+total_new_tokens=1291 total_rounds=516
+accepted_tokens=1291 proposed_draft_tokens=1548
+tau(accept_length)=2.502 proposed/round=3.000
+tree_nodes/round=14.00 (verify 实际算了这么多节点)
+ms/round=108.23
+spec:   TPOT=43.26ms  throughput=23.12 tok/s  wall=55.84s
+baseline: TPOT=41.68ms  throughput=23.99 tok/s  wall=53.35s
+speedup=0.96x  lossless(all)=True
+=============================================================
+=== [B] depth=4 topk=2 budget=200 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   2%|▏         | 15/750 [00:00<00:08, 89.50it/s]Loading weights:   3%|▎         | 24/750 [00:00<00:08, 88.78it/s]Loading weights:   4%|▍         | 33/750 [00:00<00:14, 49.68it/s]Loading weights:   6%|▌         | 45/750 [00:00<00:10, 66.27it/s]Loading weights:   7%|▋         | 54/750 [00:00<00:14, 47.75it/s]Loading weights:   8%|▊         | 61/750 [00:01<00:15, 43.43it/s]Loading weights:   9%|▉         | 70/750 [00:01<00:15, 43.96it/s]Loading weights:  11%|█         | 79/750 [00:01<00:12, 51.91it/s]Loading weights:  11%|█▏        | 86/750 [00:01<00:14, 44.57it/s]Loading weights:  12%|█▏        | 92/750 [00:01<00:15, 41.54it/s]Loading weights:  13%|█▎        | 101/750 [00:01<00:12, 50.30it/s]Loading weights:  14%|█▍        | 107/750 [00:02<00:17, 36.18it/s]Loading weights:  15%|█▌        | 114/750 [00:02<00:17, 36.12it/s]Loading weights:  17%|█▋        | 125/750 [00:02<00:16, 37.10it/s]Loading weights:  18%|█▊        | 136/750 [00:03<00:16, 37.05it/s]Loading weights:  20%|█▉        | 147/750 [00:03<00:14, 40.88it/s]Loading weights:  21%|██        | 158/750 [00:03<00:16, 36.01it/s]Loading weights:  23%|██▎       | 169/750 [00:03<00:14, 40.09it/s]Loading weights:  24%|██▎       | 177/750 [00:03<00:12, 44.92it/s]Loading weights:  24%|██▍       | 183/750 [00:04<00:15, 36.53it/s]Loading weights:  25%|██▌       | 191/750 [00:04<00:13, 41.86it/s]Loading weights:  27%|██▋       | 202/750 [00:04<00:13, 40.41it/s]Loading weights:  28%|██▊       | 213/750 [00:04<00:11, 44.90it/s]Loading weights:  30%|██▉       | 224/750 [00:05<00:11, 47.67it/s]Loading weights:  31%|███▏      | 235/750 [00:05<00:10, 49.05it/s]Loading weights:  33%|███▎      | 246/750 [00:05<00:10, 49.06it/s]Loading weights:  34%|███▍      | 257/750 [00:05<00:10, 46.50it/s]Loading weights:  35%|███▌      | 265/750 [00:05<00:09, 51.41it/s]Loading weights:  36%|███▌      | 271/750 [00:05<00:09, 50.72it/s]Loading weights:  37%|███▋      | 279/750 [00:06<00:11, 41.89it/s]Loading weights:  39%|███▊      | 290/750 [00:06<00:10, 45.20it/s]Loading weights:  40%|████      | 301/750 [00:06<00:10, 42.21it/s]Loading weights:  42%|████▏     | 312/750 [00:06<00:09, 45.43it/s]Loading weights:  43%|████▎     | 319/750 [00:07<00:08, 47.93it/s]Loading weights:  43%|████▎     | 325/750 [00:07<00:11, 37.58it/s]Loading weights:  45%|████▍     | 334/750 [00:07<00:10, 40.09it/s]Loading weights:  45%|████▌     | 340/750 [00:07<00:09, 43.42it/s]Loading weights:  46%|████▌     | 345/750 [00:07<00:11, 36.80it/s]Loading weights:  47%|████▋     | 350/750 [00:08<00:11, 33.52it/s]Loading weights:  48%|████▊     | 358/750 [00:08<00:10, 36.00it/s]Loading weights:  49%|████▉     | 367/750 [00:08<00:11, 32.45it/s]Loading weights:  50%|█████     | 377/750 [00:08<00:08, 42.58it/s]Loading weights:  51%|█████     | 383/750 [00:08<00:09, 39.14it/s]Loading weights:  52%|█████▏    | 389/750 [00:09<00:09, 37.36it/s]Loading weights:  53%|█████▎    | 399/750 [00:09<00:07, 48.49it/s]Loading weights:  54%|█████▍    | 408/750 [00:09<00:06, 53.94it/s]Loading weights:  57%|█████▋    | 431/750 [00:09<00:03, 81.25it/s]Loading weights:  60%|█████▉    | 447/750 [00:09<00:03, 98.18it/s]Loading weights:  62%|██████▏   | 467/750 [00:09<00:02, 120.48it/s]Loading weights:  64%|██████▍   | 482/750 [00:09<00:02, 122.24it/s]Loading weights:  66%|██████▌   | 496/750 [00:09<00:02, 107.19it/s]Loading weights:  71%|███████   | 530/750 [00:10<00:01, 158.33it/s]Loading weights:  73%|███████▎  | 548/750 [00:10<00:01, 153.85it/s]Loading weights:  78%|███████▊  | 583/750 [00:10<00:00, 171.81it/s]Loading weights:  81%|████████▏ | 611/750 [00:10<00:00, 190.83it/s]Loading weights:  84%|████████▍ | 631/750 [00:10<00:00, 189.32it/s]Loading weights:  87%|████████▋ | 651/750 [00:10<00:00, 155.53it/s]Loading weights:  90%|█████████ | 676/750 [00:10<00:00, 146.78it/s]Loading weights:  92%|█████████▏| 692/750 [00:11<00:00, 143.58it/s]Loading weights:  94%|█████████▍| 707/750 [00:11<00:00, 126.45it/s]Loading weights:  97%|█████████▋| 725/750 [00:11<00:00, 132.37it/s]Loading weights: 100%|██████████| 750/750 [00:11<00:00, 65.39it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=130 rounds=44 tau=2.95 proposed/round=4.00 spec_tpot=43.9ms base_tpot=36.6ms lossless=True
+[02] new=131 rounds=46 tau=2.85 proposed/round=4.00 spec_tpot=40.1ms base_tpot=36.9ms lossless=True
+[03] new=128 rounds=55 tau=2.33 proposed/round=4.00 spec_tpot=47.9ms base_tpot=36.4ms lossless=True
+[04] new=128 rounds=52 tau=2.46 proposed/round=4.00 spec_tpot=47.2ms base_tpot=41.3ms lossless=True
+[05] new=131 rounds=49 tau=2.67 proposed/round=4.00 spec_tpot=50.1ms base_tpot=42.6ms lossless=True
+[06] new=132 rounds=43 tau=3.07 proposed/round=4.00 spec_tpot=42.6ms base_tpot=45.2ms lossless=True
+[07] new=128 rounds=49 tau=2.61 proposed/round=4.00 spec_tpot=43.0ms base_tpot=36.5ms lossless=True
+[08] new=132 rounds=43 tau=3.07 proposed/round=4.00 spec_tpot=35.2ms base_tpot=32.6ms lossless=True
+[09] new=128 rounds=54 tau=2.37 proposed/round=4.00 spec_tpot=44.7ms base_tpot=34.7ms lossless=True
+[10] new=129 rounds=49 tau=2.63 proposed/round=4.00 spec_tpot=39.8ms base_tpot=35.6ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=2 num_steps(depth)=4 max_tree_nodes=200
+total_new_tokens=1297 total_rounds=484
+accepted_tokens=1297 proposed_draft_tokens=1936
+tau(accept_length)=2.680 proposed/round=4.000
+tree_nodes/round=30.00 (verify 实际算了这么多节点)
+ms/round=116.43
+spec:   TPOT=43.45ms  throughput=23.02 tok/s  wall=56.35s
+baseline: TPOT=37.84ms  throughput=26.43 tok/s  wall=48.43s
+speedup=0.87x  lossless(all)=True
+=============================================================
+=== [B] depth=5 topk=2 budget=200 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   2%|▏         | 17/750 [00:00<00:07, 94.83it/s]Loading weights:   4%|▎         | 27/750 [00:00<00:14, 51.48it/s]Loading weights:   5%|▍         | 37/750 [00:00<00:14, 50.64it/s]Loading weights:   6%|▋         | 48/750 [00:00<00:13, 51.13it/s]Loading weights:   8%|▊         | 59/750 [00:01<00:15, 45.81it/s]Loading weights:   9%|▊         | 64/750 [00:01<00:15, 45.36it/s]Loading weights:   9%|▉         | 70/750 [00:01<00:16, 41.12it/s]Loading weights:  10%|█         | 78/750 [00:01<00:13, 48.47it/s]Loading weights:  11%|█         | 84/750 [00:01<00:18, 35.78it/s]Loading weights:  12%|█▏        | 92/750 [00:01<00:15, 43.49it/s]Loading weights:  13%|█▎        | 100/750 [00:02<00:13, 49.89it/s]Loading weights:  14%|█▍        | 106/750 [00:02<00:15, 42.53it/s]Loading weights:  15%|█▌        | 114/750 [00:02<00:12, 50.11it/s]Loading weights:  17%|█▋        | 125/750 [00:02<00:13, 44.96it/s]Loading weights:  18%|█▊        | 136/750 [00:02<00:11, 55.18it/s]Loading weights:  20%|█▉        | 147/750 [00:03<00:12, 47.36it/s]Loading weights:  21%|██        | 158/750 [00:03<00:13, 43.83it/s]Loading weights:  23%|██▎       | 169/750 [00:03<00:10, 52.90it/s]Loading weights:  24%|██▍       | 180/750 [00:03<00:12, 47.17it/s]Loading weights:  25%|██▌       | 191/750 [00:04<00:11, 48.65it/s]Loading weights:  27%|██▋       | 202/750 [00:04<00:12, 44.28it/s]Loading weights:  28%|██▊       | 213/750 [00:04<00:12, 42.27it/s]Loading weights:  30%|██▉       | 224/750 [00:04<00:11, 45.24it/s]Loading weights:  31%|███▏      | 235/750 [00:04<00:10, 47.34it/s]Loading weights:  33%|███▎      | 246/750 [00:05<00:11, 44.19it/s]Loading weights:  34%|███▍      | 257/750 [00:05<00:10, 46.68it/s]Loading weights:  36%|███▌      | 268/750 [00:05<00:11, 43.41it/s]Loading weights:  37%|███▋      | 279/750 [00:06<00:10, 45.21it/s]Loading weights:  39%|███▊      | 290/750 [00:06<00:10, 42.99it/s]Loading weights:  39%|███▉      | 295/750 [00:06<00:10, 43.13it/s]Loading weights:  40%|████      | 301/750 [00:06<00:11, 40.50it/s]Loading weights:  41%|████      | 309/750 [00:06<00:09, 47.02it/s]Loading weights:  42%|████▏     | 315/750 [00:06<00:10, 41.89it/s]Loading weights:  43%|████▎     | 323/750 [00:07<00:10, 40.34it/s]Loading weights:  44%|████▍     | 331/750 [00:07<00:08, 47.17it/s]Loading weights:  45%|████▍     | 337/750 [00:07<00:09, 42.71it/s]Loading weights:  46%|████▌     | 345/750 [00:07<00:08, 49.91it/s]Loading weights:  47%|████▋     | 351/750 [00:07<00:07, 51.08it/s]Loading weights:  48%|████▊     | 357/750 [00:07<00:08, 44.11it/s]Loading weights:  49%|████▉     | 367/750 [00:07<00:08, 45.69it/s]Loading weights:  50%|█████     | 375/750 [00:08<00:07, 52.11it/s]Loading weights:  51%|█████     | 381/750 [00:08<00:09, 37.91it/s]Loading weights:  52%|█████▏    | 389/750 [00:08<00:08, 44.67it/s]Loading weights:  57%|█████▋    | 427/750 [00:08<00:02, 112.09it/s]Loading weights:  59%|█████▉    | 442/750 [00:08<00:03, 100.77it/s]Loading weights:  65%|██████▌   | 488/750 [00:08<00:01, 176.53it/s]Loading weights:  68%|██████▊   | 511/750 [00:08<00:01, 187.69it/s]Loading weights:  72%|███████▏  | 539/750 [00:09<00:01, 204.75it/s]Loading weights:  75%|███████▌  | 563/750 [00:09<00:01, 176.84it/s]Loading weights:  78%|███████▊  | 585/750 [00:09<00:00, 176.78it/s]Loading weights:  84%|████████▍ | 629/750 [00:09<00:00, 203.03it/s]Loading weights:  88%|████████▊ | 657/750 [00:09<00:00, 220.00it/s]Loading weights:  92%|█████████▏| 692/750 [00:09<00:00, 251.49it/s]Loading weights:  96%|█████████▌| 719/750 [00:09<00:00, 254.68it/s]Loading weights:  99%|█████████▉| 746/750 [00:10<00:00, 198.70it/s]Loading weights: 100%|██████████| 750/750 [00:10<00:00, 74.28it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=130 rounds=43 tau=3.02 proposed/round=5.00 spec_tpot=62.3ms base_tpot=43.9ms lossless=True
+[02] new=128 rounds=44 tau=2.91 proposed/round=5.00 spec_tpot=64.3ms base_tpot=48.6ms lossless=True
+[03] new=128 rounds=55 tau=2.33 proposed/round=5.00 spec_tpot=87.6ms base_tpot=47.2ms lossless=True
+[04] new=128 rounds=52 tau=2.46 proposed/round=5.00 spec_tpot=71.5ms base_tpot=44.0ms lossless=True
+[05] new=132 rounds=44 tau=3.00 proposed/round=5.00 spec_tpot=54.2ms base_tpot=37.3ms lossless=True
+[06] new=133 rounds=39 tau=3.41 proposed/round=5.00 spec_tpot=39.4ms base_tpot=35.7ms lossless=True
+[07] new=128 rounds=49 tau=2.61 proposed/round=5.00 spec_tpot=51.9ms base_tpot=32.8ms lossless=True
+[08] new=133 rounds=41 tau=3.24 proposed/round=5.00 spec_tpot=40.6ms base_tpot=34.0ms lossless=True
+[09] new=128 rounds=53 tau=2.42 proposed/round=5.00 spec_tpot=74.5ms base_tpot=46.2ms lossless=True
+[10] new=129 rounds=47 tau=2.74 proposed/round=5.00 spec_tpot=60.1ms base_tpot=38.7ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=2 num_steps(depth)=5 max_tree_nodes=200
+total_new_tokens=1297 total_rounds=467
+accepted_tokens=1297 proposed_draft_tokens=2335
+tau(accept_length)=2.777 proposed/round=5.000
+tree_nodes/round=62.00 (verify 实际算了这么多节点)
+ms/round=167.89
+spec:   TPOT=60.45ms  throughput=16.54 tok/s  wall=78.40s
+baseline: TPOT=40.84ms  throughput=24.49 tok/s  wall=52.28s
+speedup=0.68x  lossless(all)=True
+=============================================================
+=== [B] depth=6 topk=2 budget=200 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   2%|▏         | 15/750 [00:00<00:09, 77.43it/s]Loading weights:   3%|▎         | 26/750 [00:00<00:14, 50.73it/s]Loading weights:   5%|▍         | 37/750 [00:00<00:10, 64.86it/s]Loading weights:   6%|▌         | 45/750 [00:00<00:10, 66.77it/s]Loading weights:   7%|▋         | 53/750 [00:00<00:12, 55.88it/s]Loading weights:   8%|▊         | 60/750 [00:01<00:16, 41.14it/s]Loading weights:   9%|▉         | 70/750 [00:01<00:13, 51.85it/s]Loading weights:  10%|█         | 77/750 [00:01<00:12, 54.68it/s]Loading weights:  11%|█         | 84/750 [00:01<00:14, 47.30it/s]Loading weights:  12%|█▏        | 92/750 [00:01<00:14, 45.20it/s]Loading weights:  14%|█▎        | 103/750 [00:02<00:15, 42.38it/s]Loading weights:  15%|█▍        | 111/750 [00:02<00:13, 48.06it/s]Loading weights:  16%|█▌        | 117/750 [00:02<00:12, 50.33it/s]Loading weights:  17%|█▋        | 125/750 [00:02<00:13, 46.17it/s]Loading weights:  18%|█▊        | 136/750 [00:02<00:14, 42.09it/s]Loading weights:  20%|█▉        | 147/750 [00:03<00:14, 40.77it/s]Loading weights:  21%|██        | 158/750 [00:03<00:13, 43.55it/s]Loading weights:  23%|██▎       | 169/750 [00:03<00:12, 46.81it/s]Loading weights:  24%|██▎       | 177/750 [00:03<00:10, 52.16it/s]Loading weights:  24%|██▍       | 183/750 [00:03<00:12, 44.58it/s]Loading weights:  25%|██▌       | 191/750 [00:03<00:12, 43.65it/s]Loading weights:  27%|██▋       | 202/750 [00:04<00:13, 41.31it/s]Loading weights:  28%|██▊       | 213/750 [00:04<00:11, 45.75it/s]Loading weights:  29%|██▉       | 218/750 [00:04<00:11, 46.42it/s]Loading weights:  30%|██▉       | 224/750 [00:04<00:10, 48.09it/s]Loading weights:  31%|███▏      | 235/750 [00:04<00:10, 50.07it/s]Loading weights:  33%|███▎      | 246/750 [00:05<00:11, 44.58it/s]Loading weights:  34%|███▍      | 257/750 [00:05<00:09, 54.74it/s]Loading weights:  35%|███▌      | 264/750 [00:05<00:09, 50.04it/s]Loading weights:  36%|███▌      | 270/750 [00:05<00:09, 51.03it/s]Loading weights:  37%|███▋      | 279/750 [00:05<00:09, 48.51it/s]Loading weights:  39%|███▊      | 290/750 [00:05<00:08, 51.36it/s]Loading weights:  39%|███▉      | 296/750 [00:06<00:08, 51.71it/s]Loading weights:  40%|████      | 302/750 [00:06<00:09, 45.29it/s]Loading weights:  42%|████▏     | 312/750 [00:06<00:09, 47.36it/s]Loading weights:  42%|████▏     | 318/750 [00:06<00:08, 49.82it/s]Loading weights:  43%|████▎     | 324/750 [00:06<00:08, 50.22it/s]Loading weights:  45%|████▍     | 334/750 [00:06<00:08, 50.45it/s]Loading weights:  46%|████▌     | 345/750 [00:07<00:08, 45.09it/s]Loading weights:  47%|████▋     | 353/750 [00:07<00:07, 49.85it/s]Loading weights:  48%|████▊     | 359/750 [00:07<00:09, 43.39it/s]Loading weights:  49%|████▉     | 367/750 [00:07<00:09, 41.99it/s]Loading weights:  50%|█████     | 378/750 [00:07<00:07, 46.91it/s]Loading weights:  52%|█████▏    | 389/750 [00:08<00:08, 43.25it/s]Loading weights:  55%|█████▍    | 412/750 [00:08<00:04, 73.81it/s]Loading weights:  56%|█████▋    | 423/750 [00:08<00:04, 79.51it/s]Loading weights:  60%|██████    | 450/750 [00:08<00:02, 118.44it/s]Loading weights:  65%|██████▍   | 485/750 [00:08<00:01, 171.27it/s]Loading weights:  70%|███████   | 525/750 [00:08<00:00, 227.50it/s]Loading weights:  75%|███████▌  | 563/750 [00:08<00:00, 266.31it/s]Loading weights:  79%|███████▉  | 593/750 [00:09<00:00, 210.00it/s]Loading weights:  88%|████████▊ | 657/750 [00:09<00:00, 249.99it/s]Loading weights:  91%|█████████▏| 685/750 [00:09<00:00, 255.96it/s]Loading weights:  95%|█████████▌| 713/750 [00:09<00:00, 258.78it/s]Loading weights:  99%|█████████▉| 741/750 [00:09<00:00, 180.77it/s]Loading weights: 100%|██████████| 750/750 [00:09<00:00, 76.66it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=130 rounds=43 tau=3.02 proposed/round=6.00 spec_tpot=76.5ms base_tpot=44.4ms lossless=True
+[02] new=130 rounds=42 tau=3.10 proposed/round=6.00 spec_tpot=76.6ms base_tpot=39.0ms lossless=True
+[03] new=128 rounds=52 tau=2.46 proposed/round=6.00 spec_tpot=96.9ms base_tpot=45.4ms lossless=True
+[04] new=128 rounds=49 tau=2.61 proposed/round=6.00 spec_tpot=90.2ms base_tpot=51.1ms lossless=True
+[05] new=130 rounds=42 tau=3.10 proposed/round=6.00 spec_tpot=95.8ms base_tpot=45.9ms lossless=True
+[06] new=130 rounds=39 tau=3.33 proposed/round=6.00 spec_tpot=81.4ms base_tpot=44.5ms lossless=False
+     [diverge] at 26: spec=66963(':**') base=323(' and')
+     spec text: 'To find the difference between the highest and the lowest green bar, we need to:\n\n1.  **Identify the green bars:** The green bars represent the percentage of respondents who believe Japan should "Play a more active military role".\n\n2.  **Find the value of each green bar:**\n    -   In 2016, the green bar shows 29%.\n    -   In 2015, the green bar shows 23%.\n\n3.  **Determine the highest and lowest values:**\n    -   The highest value is 29% (from 2016'
+     base text: 'To find the difference between the highest and the lowest green bar, we need to:\n\n1.  **Identify the green bars and their values:**\n    -   The green bars represent the percentage of respondents who believe Japan should "Play a more active military role".\n    -   In 2016, the green bar value is **29%**.\n    -   In 2015, the green bar value is **23%**.\n\n2.  **Determine the highest and lowest values among these green bars:**\n    -   The highest value is **29%** (from '
+     logits gap(top1-top2)=0.000000 top5=323(' and'):39.6250, 66963(':**'):39.6250, 95518('**:'):39.3750, 13('.'):36.3125, 304(' in'):35.9062
+[07] new=128 rounds=46 tau=2.78 proposed/round=6.00 spec_tpot=82.6ms base_tpot=44.7ms lossless=True
+[08] new=134 rounds=38 tau=3.53 proposed/round=6.00 spec_tpot=67.7ms base_tpot=44.0ms lossless=True
+[09] new=128 rounds=51 tau=2.51 proposed/round=6.00 spec_tpot=96.5ms base_tpot=48.5ms lossless=True
+[10] new=129 rounds=47 tau=2.74 proposed/round=6.00 spec_tpot=78.7ms base_tpot=36.1ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=2 num_steps(depth)=6 max_tree_nodes=200
+total_new_tokens=1295 total_rounds=449
+accepted_tokens=1295 proposed_draft_tokens=2694
+tau(accept_length)=2.884 proposed/round=6.000
+tree_nodes/round=126.00 (verify 实际算了这么多节点)
+ms/round=242.82
+spec:   TPOT=84.19ms  throughput=11.88 tok/s  wall=109.03s
+baseline: TPOT=44.38ms  throughput=22.53 tok/s  wall=56.80s
+speedup=0.53x  lossless(all)=False
+=============================================================
+=== [C] depth=2 topk=8 budget=64 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   2%|▏         | 16/750 [00:00<00:08, 85.83it/s]Loading weights:   3%|▎         | 26/750 [00:00<00:11, 63.78it/s]Loading weights:   5%|▍         | 37/750 [00:00<00:12, 58.55it/s]Loading weights:   6%|▋         | 48/750 [00:00<00:12, 57.11it/s]Loading weights:   8%|▊         | 59/750 [00:01<00:14, 48.84it/s]Loading weights:   9%|▉         | 70/750 [00:01<00:13, 49.39it/s]Loading weights:  11%|█         | 82/750 [00:01<00:14, 46.51it/s]Loading weights:  12%|█▏        | 92/750 [00:01<00:14, 46.27it/s]Loading weights:  14%|█▎        | 103/750 [00:02<00:13, 48.97it/s]Loading weights:  15%|█▍        | 111/750 [00:02<00:13, 47.72it/s]Loading weights:  15%|█▌        | 116/750 [00:02<00:15, 40.30it/s]Loading weights:  17%|█▋        | 125/750 [00:02<00:14, 41.76it/s]Loading weights:  18%|█▊        | 136/750 [00:02<00:13, 45.43it/s]Loading weights:  20%|█▉        | 147/750 [00:03<00:12, 48.01it/s]Loading weights:  21%|██        | 158/750 [00:03<00:11, 50.04it/s]Loading weights:  23%|██▎       | 169/750 [00:03<00:10, 52.86it/s]Loading weights:  23%|██▎       | 175/750 [00:03<00:10, 54.13it/s]Loading weights:  24%|██▍       | 181/750 [00:03<00:10, 53.67it/s]Loading weights:  25%|██▌       | 191/750 [00:03<00:10, 52.59it/s]Loading weights:  27%|██▋       | 202/750 [00:04<00:11, 45.96it/s]Loading weights:  28%|██▊       | 213/750 [00:04<00:12, 42.29it/s]Loading weights:  30%|██▉       | 224/750 [00:04<00:11, 46.33it/s]Loading weights:  31%|███       | 229/750 [00:04<00:11, 46.84it/s]Loading weights:  31%|███▏      | 235/750 [00:04<00:10, 48.87it/s]Loading weights:  32%|███▏      | 241/750 [00:04<00:11, 42.75it/s]Loading weights:  33%|███▎      | 246/750 [00:05<00:11, 44.15it/s]Loading weights:  34%|███▍      | 254/750 [00:05<00:09, 51.55it/s]Loading weights:  35%|███▍      | 260/750 [00:05<00:09, 52.80it/s]Loading weights:  36%|███▌      | 268/750 [00:05<00:08, 58.93it/s]Loading weights:  37%|███▋      | 279/750 [00:05<00:09, 47.63it/s]Loading weights:  39%|███▊      | 290/750 [00:05<00:09, 50.13it/s]Loading weights:  40%|████      | 301/750 [00:06<00:09, 45.43it/s]Loading weights:  42%|████▏     | 312/750 [00:06<00:07, 54.79it/s]Loading weights:  43%|████▎     | 323/750 [00:06<00:06, 64.18it/s]Loading weights:  45%|████▍     | 334/750 [00:06<00:06, 62.06it/s]Loading weights:  46%|████▌     | 345/750 [00:06<00:08, 45.53it/s]Loading weights:  47%|████▋     | 356/750 [00:07<00:09, 42.38it/s]Loading weights:  49%|████▉     | 367/750 [00:07<00:08, 44.84it/s]Loading weights:  50%|█████     | 378/750 [00:07<00:08, 42.49it/s]Loading weights:  52%|█████▏    | 389/750 [00:07<00:07, 51.05it/s]Loading weights:  56%|█████▌    | 417/750 [00:08<00:04, 78.55it/s]Loading weights:  60%|██████    | 451/750 [00:08<00:02, 123.19it/s]Loading weights:  65%|██████▌   | 491/750 [00:08<00:01, 175.14it/s]Loading weights:  71%|███████   | 532/750 [00:08<00:00, 226.19it/s]Loading weights:  75%|███████▍  | 561/750 [00:08<00:00, 193.95it/s]Loading weights:  81%|████████  | 608/750 [00:08<00:00, 252.93it/s]Loading weights:  85%|████████▌ | 639/750 [00:08<00:00, 265.35it/s]Loading weights:  89%|████████▉ | 670/750 [00:08<00:00, 227.42it/s]Loading weights:  94%|█████████▍| 708/750 [00:09<00:00, 262.03it/s]Loading weights:  98%|█████████▊| 738/750 [00:09<00:00, 211.78it/s]Loading weights: 100%|██████████| 750/750 [00:09<00:00, 79.88it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=130 rounds=50 tau=2.60 proposed/round=1.86 spec_tpot=57.3ms base_tpot=53.5ms lossless=True
+[02] new=128 rounds=51 tau=2.51 proposed/round=1.84 spec_tpot=53.4ms base_tpot=48.8ms lossless=True
+[03] new=130 rounds=54 tau=2.41 proposed/round=1.78 spec_tpot=61.6ms base_tpot=49.1ms lossless=True
+[04] new=128 rounds=53 tau=2.42 proposed/round=1.77 spec_tpot=64.1ms base_tpot=45.8ms lossless=True
+[05] new=129 rounds=50 tau=2.58 proposed/round=1.82 spec_tpot=39.9ms base_tpot=31.8ms lossless=True
+[06] new=129 rounds=48 tau=2.69 proposed/round=1.85 spec_tpot=33.6ms base_tpot=32.8ms lossless=True
+[07] new=129 rounds=51 tau=2.53 proposed/round=1.82 spec_tpot=43.5ms base_tpot=44.3ms lossless=True
+[08] new=130 rounds=49 tau=2.65 proposed/round=1.86 spec_tpot=34.9ms base_tpot=32.6ms lossless=True
+[09] new=130 rounds=56 tau=2.32 proposed/round=1.71 spec_tpot=47.5ms base_tpot=34.7ms lossless=True
+[10] new=129 rounds=54 tau=2.39 proposed/round=1.76 spec_tpot=50.6ms base_tpot=39.0ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=8 num_steps(depth)=2 max_tree_nodes=64
+total_new_tokens=1292 total_rounds=516
+accepted_tokens=1292 proposed_draft_tokens=932
+tau(accept_length)=2.504 proposed/round=1.806
+tree_nodes/round=64.00 (verify 实际算了这么多节点)
+ms/round=121.76
+spec:   TPOT=48.63ms  throughput=20.56 tok/s  wall=62.83s
+baseline: TPOT=41.24ms  throughput=24.25 tok/s  wall=52.78s
+speedup=0.85x  lossless(all)=True
+=============================================================
+=== [C] depth=3 topk=4 budget=64 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   2%|▏         | 15/750 [00:00<00:10, 73.19it/s]Loading weights:   3%|▎         | 26/750 [00:00<00:14, 49.34it/s]Loading weights:   5%|▍         | 37/750 [00:00<00:16, 43.66it/s]Loading weights:   6%|▋         | 48/750 [00:00<00:14, 47.26it/s]Loading weights:   8%|▊         | 59/750 [00:01<00:14, 48.41it/s]Loading weights:   9%|▉         | 70/750 [00:01<00:15, 43.71it/s]Loading weights:  11%|█         | 81/750 [00:01<00:13, 48.05it/s]Loading weights:  12%|█▏        | 92/750 [00:01<00:13, 49.85it/s]Loading weights:  13%|█▎        | 100/750 [00:01<00:11, 54.96it/s]Loading weights:  14%|█▍        | 107/750 [00:02<00:13, 48.17it/s]Loading weights:  15%|█▌        | 114/750 [00:02<00:14, 42.54it/s]Loading weights:  17%|█▋        | 125/750 [00:02<00:13, 47.19it/s]Loading weights:  18%|█▊        | 136/750 [00:02<00:14, 42.68it/s]Loading weights:  20%|█▉        | 147/750 [00:03<00:14, 41.43it/s]Loading weights:  21%|██        | 158/750 [00:03<00:13, 44.49it/s]Loading weights:  23%|██▎       | 169/750 [00:03<00:15, 37.76it/s]Loading weights:  24%|██▍       | 180/750 [00:03<00:12, 46.12it/s]Loading weights:  25%|██▌       | 191/750 [00:04<00:14, 38.72it/s]Loading weights:  27%|██▋       | 202/750 [00:04<00:12, 42.93it/s]Loading weights:  28%|██▊       | 210/750 [00:04<00:12, 42.09it/s]Loading weights:  29%|██▊       | 215/750 [00:04<00:12, 42.44it/s]Loading weights:  30%|██▉       | 224/750 [00:05<00:15, 33.83it/s]Loading weights:  31%|███▏      | 235/750 [00:05<00:13, 39.17it/s]Loading weights:  33%|███▎      | 246/750 [00:05<00:11, 42.67it/s]Loading weights:  34%|███▍      | 257/750 [00:05<00:12, 40.72it/s]Loading weights:  35%|███▌      | 265/750 [00:06<00:10, 45.94it/s]Loading weights:  36%|███▌      | 271/750 [00:06<00:11, 41.90it/s]Loading weights:  37%|███▋      | 279/750 [00:06<00:09, 47.88it/s]Loading weights:  39%|███▊      | 290/750 [00:06<00:10, 43.84it/s]Loading weights:  40%|████      | 301/750 [00:06<00:09, 45.59it/s]Loading weights:  42%|████▏     | 312/750 [00:07<00:10, 42.90it/s]Loading weights:  42%|████▏     | 318/750 [00:07<00:09, 45.53it/s]Loading weights:  43%|████▎     | 324/750 [00:07<00:11, 35.85it/s]Loading weights:  45%|████▍     | 334/750 [00:07<00:09, 46.08it/s]Loading weights:  46%|████▌     | 345/750 [00:07<00:08, 48.20it/s]Loading weights:  47%|████▋     | 356/750 [00:08<00:08, 44.24it/s]Loading weights:  49%|████▉     | 367/750 [00:08<00:08, 45.82it/s]Loading weights:  50%|█████     | 378/750 [00:08<00:07, 49.69it/s]Loading weights:  51%|█████▏    | 386/750 [00:08<00:06, 54.79it/s]Loading weights:  52%|█████▏    | 393/750 [00:08<00:07, 48.58it/s]Loading weights:  56%|█████▌    | 420/750 [00:08<00:03, 90.59it/s]Loading weights:  59%|█████▊    | 439/750 [00:08<00:02, 111.74it/s]Loading weights:  63%|██████▎   | 472/750 [00:09<00:01, 162.62it/s]Loading weights:  66%|██████▌   | 492/750 [00:09<00:01, 136.32it/s]Loading weights:  69%|██████▉   | 519/750 [00:09<00:01, 165.40it/s]Loading weights:  73%|███████▎  | 549/750 [00:09<00:01, 196.20it/s]Loading weights:  76%|███████▋  | 572/750 [00:09<00:00, 203.35it/s]Loading weights:  79%|███████▉  | 595/750 [00:09<00:00, 208.44it/s]Loading weights:  83%|████████▎ | 621/750 [00:09<00:00, 221.23it/s]Loading weights:  87%|████████▋ | 650/750 [00:09<00:00, 196.55it/s]Loading weights:  90%|████████▉ | 672/750 [00:10<00:00, 162.16it/s]Loading weights:  92%|█████████▏| 693/750 [00:10<00:00, 172.61it/s]Loading weights:  95%|█████████▍| 712/750 [00:10<00:00, 175.25it/s]Loading weights:  97%|█████████▋| 731/750 [00:10<00:00, 141.54it/s]Loading weights: 100%|██████████| 750/750 [00:10<00:00, 70.14it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=130 rounds=47 tau=2.77 proposed/round=2.74 spec_tpot=57.2ms base_tpot=40.6ms lossless=True
+[02] new=128 rounds=47 tau=2.72 proposed/round=2.68 spec_tpot=48.1ms base_tpot=35.6ms lossless=True
+[03] new=131 rounds=50 tau=2.62 proposed/round=2.68 spec_tpot=58.0ms base_tpot=46.3ms lossless=True
+[04] new=128 rounds=47 tau=2.72 proposed/round=2.72 spec_tpot=56.8ms base_tpot=48.7ms lossless=True
+[05] new=130 rounds=45 tau=2.89 proposed/round=2.80 spec_tpot=50.6ms base_tpot=40.7ms lossless=True
+[06] new=131 rounds=45 tau=2.91 proposed/round=2.73 spec_tpot=37.6ms base_tpot=34.2ms lossless=True
+[07] new=130 rounds=49 tau=2.65 proposed/round=2.67 spec_tpot=43.1ms base_tpot=45.1ms lossless=True
+[08] new=131 rounds=40 tau=3.27 proposed/round=2.88 spec_tpot=39.3ms base_tpot=36.2ms lossless=True
+[09] new=129 rounds=54 tau=2.39 proposed/round=2.61 spec_tpot=64.6ms base_tpot=50.8ms lossless=True
+[10] new=128 rounds=45 tau=2.84 proposed/round=2.69 spec_tpot=57.9ms base_tpot=39.5ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=4 num_steps(depth)=3 max_tree_nodes=64
+total_new_tokens=1296 total_rounds=469
+accepted_tokens=1296 proposed_draft_tokens=1274
+tau(accept_length)=2.763 proposed/round=2.716
+tree_nodes/round=64.00 (verify 实际算了这么多节点)
+ms/round=141.71
+spec:   TPOT=51.28ms  throughput=19.50 tok/s  wall=66.46s
+baseline: TPOT=41.77ms  throughput=23.94 tok/s  wall=53.46s
+speedup=0.81x  lossless(all)=True
+=============================================================
+=== [C] depth=5 topk=2 budget=64 ===
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   2%|▏         | 15/750 [00:00<00:12, 56.61it/s]Loading weights:   3%|▎         | 26/750 [00:00<00:10, 71.25it/s]Loading weights:   5%|▍         | 37/750 [00:00<00:13, 51.79it/s]Loading weights:   6%|▌         | 45/750 [00:00<00:12, 57.55it/s]Loading weights:   7%|▋         | 52/750 [00:00<00:14, 49.48it/s]Loading weights:   8%|▊         | 59/750 [00:01<00:18, 37.25it/s]Loading weights:   9%|▉         | 70/750 [00:01<00:15, 42.59it/s]Loading weights:  10%|█         | 75/750 [00:01<00:15, 43.75it/s]Loading weights:  11%|█         | 81/750 [00:01<00:14, 46.84it/s]Loading weights:  12%|█▏        | 87/750 [00:01<00:13, 48.77it/s]Loading weights:  12%|█▏        | 93/750 [00:02<00:18, 36.08it/s]Loading weights:  14%|█▎        | 103/750 [00:02<00:13, 47.58it/s]Loading weights:  15%|█▌        | 114/750 [00:02<00:12, 50.27it/s]Loading weights:  17%|█▋        | 125/750 [00:02<00:12, 50.77it/s]Loading weights:  17%|█▋        | 131/750 [00:02<00:13, 45.63it/s]Loading weights:  18%|█▊        | 137/750 [00:02<00:12, 47.60it/s]Loading weights:  20%|█▉        | 147/750 [00:03<00:12, 47.77it/s]Loading weights:  21%|██        | 158/750 [00:03<00:13, 44.15it/s]Loading weights:  23%|██▎       | 169/750 [00:03<00:12, 47.17it/s]Loading weights:  24%|██▍       | 180/750 [00:03<00:11, 49.80it/s]Loading weights:  25%|██▌       | 191/750 [00:03<00:09, 59.13it/s]Loading weights:  27%|██▋       | 202/750 [00:04<00:10, 50.03it/s]Loading weights:  28%|██▊       | 213/750 [00:04<00:09, 58.86it/s]Loading weights:  29%|██▉       | 220/750 [00:04<00:08, 60.91it/s]Loading weights:  30%|███       | 227/750 [00:04<00:10, 51.78it/s]Loading weights:  31%|███▏      | 235/750 [00:04<00:12, 41.17it/s]Loading weights:  33%|███▎      | 246/750 [00:05<00:11, 45.27it/s]Loading weights:  34%|███▍      | 257/750 [00:05<00:10, 47.79it/s]Loading weights:  36%|███▌      | 268/750 [00:05<00:09, 50.71it/s]Loading weights:  37%|███▋      | 279/750 [00:05<00:09, 51.61it/s]Loading weights:  38%|███▊      | 287/750 [00:05<00:08, 56.46it/s]Loading weights:  39%|███▉      | 294/750 [00:06<00:10, 42.95it/s]Loading weights:  40%|████      | 301/750 [00:06<00:09, 47.14it/s]Loading weights:  41%|████      | 307/750 [00:06<00:08, 49.48it/s]Loading weights:  42%|████▏     | 313/750 [00:06<00:08, 51.39it/s]Loading weights:  43%|████▎     | 319/750 [00:06<00:08, 53.40it/s]Loading weights:  43%|████▎     | 325/750 [00:06<00:09, 43.97it/s]Loading weights:  45%|████▍     | 334/750 [00:06<00:09, 45.03it/s]Loading weights:  45%|████▌     | 339/750 [00:06<00:09, 44.74it/s]Loading weights:  46%|████▌     | 345/750 [00:07<00:09, 40.95it/s]Loading weights:  47%|████▋     | 353/750 [00:07<00:08, 49.17it/s]Loading weights:  48%|████▊     | 359/750 [00:07<00:09, 41.98it/s]Loading weights:  49%|████▉     | 367/750 [00:07<00:07, 48.81it/s]Loading weights:  50%|█████     | 378/750 [00:07<00:07, 50.96it/s]Loading weights:  51%|█████     | 384/750 [00:07<00:08, 44.79it/s]Loading weights:  52%|█████▏    | 389/750 [00:08<00:08, 42.73it/s]Loading weights:  56%|█████▌    | 419/750 [00:08<00:03, 83.37it/s]Loading weights:  60%|██████    | 451/750 [00:08<00:02, 131.81it/s]Loading weights:  63%|██████▎   | 473/750 [00:08<00:01, 148.08it/s]Loading weights:  71%|███████   | 531/750 [00:08<00:01, 214.44it/s]Loading weights:  75%|███████▍  | 559/750 [00:08<00:00, 229.19it/s]Loading weights:  80%|███████▉  | 597/750 [00:08<00:00, 265.39it/s]Loading weights:  83%|████████▎ | 625/750 [00:09<00:00, 213.87it/s]Loading weights:  88%|████████▊ | 657/750 [00:09<00:00, 237.85it/s]Loading weights:  91%|█████████ | 684/750 [00:09<00:00, 245.41it/s]Loading weights:  95%|█████████▌| 714/750 [00:09<00:00, 248.27it/s]Loading weights:  99%|█████████▉| 741/750 [00:09<00:00, 206.62it/s]Loading weights: 100%|██████████| 750/750 [00:09<00:00, 78.32it/s] 
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done
+[01] new=130 rounds=43 tau=3.02 proposed/round=5.00 spec_tpot=62.6ms base_tpot=53.2ms lossless=True
+[02] new=128 rounds=44 tau=2.91 proposed/round=5.00 spec_tpot=69.3ms base_tpot=55.5ms lossless=True
+[03] new=128 rounds=55 tau=2.33 proposed/round=5.00 spec_tpot=98.7ms base_tpot=50.3ms lossless=True
+[04] new=128 rounds=52 tau=2.46 proposed/round=5.00 spec_tpot=83.2ms base_tpot=51.9ms lossless=True
+[05] new=132 rounds=44 tau=3.00 proposed/round=5.00 spec_tpot=70.6ms base_tpot=48.8ms lossless=True
+[06] new=133 rounds=39 tau=3.41 proposed/round=5.00 spec_tpot=57.1ms base_tpot=49.9ms lossless=True
+[07] new=128 rounds=49 tau=2.61 proposed/round=5.00 spec_tpot=98.5ms base_tpot=58.5ms lossless=True
+[08] new=133 rounds=41 tau=3.24 proposed/round=5.00 spec_tpot=64.8ms base_tpot=45.6ms lossless=True
+[09] new=128 rounds=53 tau=2.42 proposed/round=5.00 spec_tpot=68.5ms base_tpot=45.0ms lossless=True
+[10] new=129 rounds=47 tau=2.74 proposed/round=5.00 spec_tpot=67.7ms base_tpot=49.1ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=128
+tree: topk(width)=2 num_steps(depth)=5 max_tree_nodes=64
+total_new_tokens=1297 total_rounds=467
+accepted_tokens=1297 proposed_draft_tokens=2335
+tau(accept_length)=2.777 proposed/round=5.000
+tree_nodes/round=62.00 (verify 实际算了这么多节点)
+ms/round=205.39
+spec:   TPOT=73.95ms  throughput=13.52 tok/s  wall=95.92s
+baseline: TPOT=50.78ms  throughput=19.69 tok/s  wall=64.99s
+speedup=0.69x  lossless(all)=True
+=============================================================

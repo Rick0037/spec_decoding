@@ -17,7 +17,7 @@ torch.profiler 剖析 EAGLE3:定位单步投机里最耗时 / 多余的操作。
 
     cd <工程根> && PYTHONPATH=. python3 -m spec_decoding.eagle3_sgl.example.profile_eagle3_sgl \\
         --max-new-tokens 128 --topk 8 --num-steps 8 --max-tree-nodes 64 \\
-        --trace-out spec_decoding/eagle3_sgl/example/eagle3_trace.json
+        --trace-out /tmp/eagle3_trace.json.gz
 """
 
 from __future__ import annotations
@@ -26,8 +26,10 @@ import torch
 import time
 
 import argparse
+import gzip
 import json
 import os
+import shutil
 
 os.environ.setdefault("EAGLE3_SGL_PROFILE", "1")  # 必须在 import runner 前
 
@@ -44,28 +46,34 @@ from spec_decoding.eagle3_sgl.example.bench_accept_tpot import (
 
 
 def _stage_table(prof) -> str:
-    """汇总 record_function "stage:*" 标签的 device 时间(含子 kernel)."""
+    """汇总 stage 的 device 时间.
+
+    PyTorch 2.14 会把一个 stage 分成 CPU / CUDA 两条同名事件. 正确的子 kernel
+    时间在 CPU 事件的 device_time_total 里; CUDA 同名事件是另一条区间, 不能使用,
+    否则既会重复计数, 又可能出现超过 100% 的占比.
+    """
     rows = []
-    for evt in prof.key_averages():
-        key = evt.key
-        if not key.startswith("stage:"):
+    for event in prof.key_averages():
+        if not event.key.startswith("stage:") or event.device_type.name != "CPU":
             continue
-        cuda_us = float(getattr(evt, "self_cuda_time_total", 0) or 0)
-        dev_us = float(getattr(evt, "cuda_time_total", 0) or 0)
-        cpu_us = float(getattr(evt, "cpu_time_total", 0) or 0)
-        rows.append((key, evt.count, dev_us, cpu_us))
-    rows.sort(key=lambda r: r[2], reverse=True)
-    total_dev = sum(r[2] for r in rows) or 1.0
-    out = [
-        "\n================= 分阶段 device 时间(stage:* 标签,含子 kernel)=================",
+        device_time = float(event.device_time_total or 0)
+        cpu_time = float(event.cpu_time_total or 0)
+        rows.append((event.key, event.count, device_time, cpu_time))
+    rows.sort(key=lambda row: row[2], reverse=True)
+    total_device_time = sum(row[2] for row in rows) or 1.0
+    lines = [
+        "\n================= 分阶段 device 时间(仅 CPU stage 事件,含子 kernel)=================",
         f"{'stage':<28}{'calls':>8}{'dev_ms':>12}{'%dev':>8}{'cpu_ms':>12}",
     ]
-    for key, cnt, dev_us, cpu_us in rows:
-        out.append(
-            f"{key:<28}{cnt:>8}{dev_us / 1e3:>12.2f}{100 * dev_us / total_dev:>7.1f}%{cpu_us / 1e3:>12.2f}"
+    for key, count, device_time, cpu_time in rows:
+        lines.append(
+            f"{key:<28}{count:>8}{device_time / 1e3:>12.2f}"
+            f"{100 * device_time / total_device_time:>7.1f}%{cpu_time / 1e3:>12.2f}"
         )
-    out.append(f"{'(stage total)':<28}{'':>8}{total_dev / 1e3:>12.2f}{100.0:>7.1f}%")
-    return "\n".join(out)
+    lines.append(
+        f"{'(stage total)':<28}{'':>8}{total_device_time / 1e3:>12.2f}{100.0:>7.1f}%"
+    )
+    return "\n".join(lines)
 
 
 def _counts_table(prof) -> str:
@@ -86,7 +94,7 @@ def _counts_table(prof) -> str:
         for wanted in wanted_events:
             if wanted.lower() in event.key.lower():
                 cpu_time = float(getattr(event, "cpu_time_total", 0) or 0)
-                cuda_time = float(getattr(event, "self_cuda_time_total", 0) or 0)
+                cuda_time = float(event.self_device_time_total or 0)
                 count, old_cpu, old_cuda = aggregated.get(wanted, (0, 0.0, 0.0))
                 aggregated[wanted] = (
                     count + event.count,
@@ -105,6 +113,20 @@ def _counts_table(prof) -> str:
                 f"{wanted:<28}{count:>12}{cpu_time / 1e3:>12.1f}{cuda_time / 1e3:>12.1f}"
             )
     return "\n".join(lines)
+
+
+def _operator_table(prof, sort_by: str, row_limit: int) -> str:
+    """Top 算子表不混入 stage 区间, 避免 stage 与子算子被重复归因."""
+    from torch.autograd.profiler import EventList
+
+    operator_events = EventList(
+        [
+            event
+            for event in prof.key_averages()
+            if not event.key.startswith("stage:")
+        ]
+    )
+    return operator_events.table(sort_by=sort_by, row_limit=row_limit)
 
 
 def main() -> None:
@@ -262,11 +284,11 @@ def main() -> None:
     print(stage)
     print(counts)
 
-    by_self_cuda = prof.key_averages().table(
-        sort_by="self_cuda_time_total", row_limit=args.top_n
+    by_self_cuda = _operator_table(
+        prof, sort_by="self_cuda_time_total", row_limit=args.top_n
     )
-    by_cpu = prof.key_averages().table(
-        sort_by="self_cpu_time_total", row_limit=args.top_n
+    by_cpu = _operator_table(
+        prof, sort_by="self_cpu_time_total", row_limit=args.top_n
     )
     print("\n================= Top 算子(self CUDA 时间)=================")
     print(by_self_cuda)
@@ -274,8 +296,19 @@ def main() -> None:
     print(by_cpu)
 
     if args.trace_out:
-        prof.export_chrome_trace(args.trace_out)
-        print(f"[profile] chrome trace -> {os.path.abspath(args.trace_out)}")
+        # Chrome trace 文本体积很大, 默认只保留 gzip 压缩版.
+        trace_path = os.path.abspath(args.trace_out)
+        raw_trace_path = trace_path[:-3] if trace_path.endswith(".gz") else trace_path
+        compressed_trace_path = (
+            trace_path if trace_path.endswith(".gz") else trace_path + ".gz"
+        )
+        prof.export_chrome_trace(raw_trace_path)
+        with open(raw_trace_path, "rb") as source, gzip.open(
+            compressed_trace_path, "wb"
+        ) as destination:
+            shutil.copyfileobj(source, destination)
+        os.remove(raw_trace_path)
+        print(f"[profile] chrome trace(gzip) -> {compressed_trace_path}")
 
     if args.report_out:
         with open(args.report_out, "w", encoding="utf-8") as f:
