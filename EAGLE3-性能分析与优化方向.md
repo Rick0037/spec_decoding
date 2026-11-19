@@ -303,6 +303,8 @@ acts_all[:, -1:, :]      -> 最后一个 prompt 位置的特征 f(P-1)
 
 结论：可行性中等，潜在 tau 收益中等，但工程复杂度较高。适合先做首次 prefill 的小实验验证正确性和接受率，不应直接假设“与论文对齐就一定提速”。
 
+实现状态：已按 feature/modity_frist_token 分支提交 9fd02c8 移植到当前 eagle2_batch + 批量 D2H 代码，并补齐 VL 的 rope_delta。开关为 `preconsume_first_token`（bench 加 `--preconsume`），默认关闭以便与基线 A/B。draft prefill 追加消费 (xP, f(P-1))，建树时 xP 作为确定根节点、draft 候选全部挂为后代；首轮更新 draft 时跳过 xP 防止重复写 KV，只接受根 token 时不再 extend。proposed 统计不计确定根节点。合成状态对齐测试与随机小 GPT2 端到端 greedy 对照均通过（bfs/eagle2_batch × preconsume 开/关 四组全部无损）。真实权重的 tau 与速度收益待 A/B。
+
 ### 6.3 复用 verify KV 并删除 target replay
 
 #### 需要先修正的前提

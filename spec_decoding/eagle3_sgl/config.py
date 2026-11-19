@@ -30,6 +30,8 @@ class Eagle3SglConfig:
     """verify 节点预算. BFS 按创建顺序截断, EAGLE2 按累计分数剪枝。"""
     draft_tree_mode: str = "eagle2_batch"
     """draft 建树策略: eagle2=逐节点 beam, eagle2_batch=按层 batch beam, bfs=原 BFS。"""
+    preconsume_first_token: bool = True
+    """draft prefill 预消费 target 已确定的首个 token + 末位 feature; 建树时它作为确定根节点."""
     eagle_layers: Optional[List[int]] = None
     """作为 draft 条件的 target 多层 hidden 下标;None 时用 default_eagle_layers。"""
     verify_mode: str = "full_model_tree"

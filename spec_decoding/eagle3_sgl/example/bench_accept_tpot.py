@@ -318,6 +318,12 @@ def main() -> None:
         choices=["eagle2", "eagle2_batch", "bfs"],
         help="eagle2=逐节点 beam, eagle2_batch=按层 batch beam, bfs=原 BFS",
     )
+    parser.add_argument(
+        "--preconsume",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="draft prefill 预消费 target 确定的首 token + 末位 feature; --no-preconsume 关闭",
+    )
     parser.add_argument("--verify-backend", default="triton_tree")
     parser.add_argument(
         "--verify-mode",
@@ -367,6 +373,7 @@ def main() -> None:
         num_steps=command_line_args.num_steps,
         max_tree_nodes=command_line_args.max_tree_nodes,
         draft_tree_mode=command_line_args.tree_mode,
+        preconsume_first_token=command_line_args.preconsume,
         verify_mode=command_line_args.verify_mode,
         verify_attn_backend=command_line_args.verify_backend,
     )
@@ -562,7 +569,7 @@ def main() -> None:
         f"mode={mode} dtype={command_line_args.dtype} explain={command_line_args.explain}",
         f"target={target_id} draft={draft_id}",
         f"num_prompts={len(summary.results)} max_new_tokens={command_line_args.max_new_tokens}",
-        f"tree: mode={command_line_args.tree_mode} topk(width)={command_line_args.topk} num_steps(depth)={command_line_args.num_steps} max_tree_nodes={command_line_args.max_tree_nodes}",
+        f"tree: mode={command_line_args.tree_mode} preconsume={command_line_args.preconsume} topk(width)={command_line_args.topk} num_steps(depth)={command_line_args.num_steps} max_tree_nodes={command_line_args.max_tree_nodes}",
         f"total_new_tokens={total_new} total_rounds={total_rounds}",
         f"accepted_tokens={total_accepted} proposed_draft_tokens={total_proposed}",
         f"tau(accept_length)={tau:.3f} proposed/round={proposed_per_round:.3f}",
