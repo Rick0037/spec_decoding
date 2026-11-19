@@ -25,7 +25,7 @@
 ### 树投机 + verify 框架
 
 - **Top-k > 1 树形 draft**:每步保留 K 个分支,一次 verify 多条候选路径。
-- **verify 模式**:`full_model_tree`(extend verify,推荐)与 `reference_paths`(逐叶干净前向,慢、作对照)。
+- **verify 模式**:EAGLE2 有 `full_model_tree`(extend verify)与 `reference_paths`(逐叶干净前向,作对照);EAGLE3 固定 `full_model_tree`,`reference_paths` 已删除。
 - **verify 后端**:`verify_attn_backend ∈ {auto, eager, flash_attn, triton_tree}`。
 - **extend verify 路径**(Runner 实际调用):
   ```text
@@ -284,10 +284,11 @@ EAGLE3 额外维护:
 **EAGLE3 `Eagle3SglConfig`**:
 
 - `eagle_layers: Optional[List[int]]` + `resolve_eagle_layers(num_hidden_layers)`
-- `tree_expand_mode: cumulative | static`
+- `draft_tree_mode: eagle2_batch | bfs`(默认 eagle2_batch)
+- `skip_replay`(默认 True)/ `decode_cuda_graph`(默认 False)
 - 默认 `topk=8, num_steps=8, max_tree_nodes=64`
 
-其余 `verify_mode` / `verify_attn_backend` 字段与白名单校验一致。
+EAGLE2 另有 `verify_mode` 白名单;EAGLE3 固定树掩码 verify,只有 `verify_attn_backend` 走白名单校验。
 
 
 ## 例子 / 测试 / 文档索引

@@ -285,7 +285,7 @@ def _format_report(
 
     lines = [
         f"[eagle3_sgl mtbench] target={target_id} draft={args.eagle3_draft} "
-        f"verify={args.verify_mode}(backend={args.verify_attn_backend}) "
+        f"verify_backend={args.verify_attn_backend} "
         f"ar_draft=True inc_acts=True inc_draft_ext=True "
         f"eagle_layers={eagle_layers} topk={args.topk} num_steps={args.num_steps} "
         f"max_nodes={args.max_tree_nodes} dtype={args.dtype}",
@@ -319,11 +319,6 @@ def main() -> None:
     p.add_argument("--topk", type=int, default=8)
     p.add_argument("--num-steps", type=int, default=8)
     p.add_argument("--max-tree-nodes", type=int, default=64)
-    p.add_argument(
-        "--verify-mode",
-        default="full_model_tree",
-        choices=["reference_paths", "full_model_tree"],
-    )
     p.add_argument(
         "--verify-attn-backend",
         default="auto",
@@ -383,7 +378,6 @@ def main() -> None:
         topk=args.topk,
         num_steps=args.num_steps,
         max_tree_nodes=args.max_tree_nodes,
-        verify_mode=args.verify_mode,
         verify_attn_backend=args.verify_attn_backend,
     )
     eagle_layers = cfg.resolve_eagle_layers(n_layers)

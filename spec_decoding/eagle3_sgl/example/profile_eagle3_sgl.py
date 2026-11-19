@@ -143,12 +143,7 @@ def main() -> None:
     p.add_argument("--num-steps", type=int, default=8)
     p.add_argument("--max-tree-nodes", type=int, default=64)
     p.add_argument(
-        "--tree-mode", default="eagle2_batch", choices=["eagle2", "eagle2_batch", "bfs"]
-    )
-    p.add_argument(
-        "--verify-mode",
-        default="full_model_tree",
-        choices=["reference_paths", "full_model_tree"],
+        "--tree-mode", default="eagle2_batch", choices=["eagle2_batch", "bfs"]
     )
     p.add_argument(
         "--verify-attn-backend",
@@ -204,7 +199,6 @@ def main() -> None:
         num_steps=args.num_steps,
         max_tree_nodes=args.max_tree_nodes,
         draft_tree_mode=args.tree_mode,
-        verify_mode=args.verify_mode,
         verify_attn_backend=args.verify_attn_backend,
     )
     eagle_layers = cfg.resolve_eagle_layers(n_layers)
@@ -276,7 +270,7 @@ def main() -> None:
     header = (
         f"\n==================== EAGLE3 torch.profiler ====================\n"
         f"mode={args.mode} target={target_id} draft={draft_id}\n"
-        f"tree_mode={args.tree_mode} verify={args.verify_mode}({args.verify_attn_backend}) "
+        f"tree_mode={args.tree_mode} verify_backend={args.verify_attn_backend} "
         f"topk={args.topk} steps={args.num_steps} nodes={args.max_tree_nodes} dtype={args.dtype}\n"
         f"new_tokens={n_new} rounds={gen.n_rounds} accept/round={accept:.2f} "
         f"wall={wall:.2f}s spec_tok/s={n_new / wall:.2f}"

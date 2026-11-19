@@ -47,8 +47,6 @@ def main() -> None:
         num_steps=args.num_steps,
         max_tree_nodes=8,
         eagle_layers=eagle_layers,
-        # CPU 友好(full_model_tree 需 decoder mask patch)
-        verify_mode="reference_paths",
     )
     layers = cfg.resolve_eagle_layers(n_layers)
 

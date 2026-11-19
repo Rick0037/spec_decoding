@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
-from typing import Any, List, Tuple
+from typing import List, Tuple
 
 import torch
 
@@ -97,18 +96,6 @@ def _topk_target_log_probs(
     return topk_ids, topk_log_probabilities
 
 
-@dataclass
-class _FrontierNode:
-    """一条活跃 draft 路径的 AR 状态."""
-
-    tree_index: int
-    token_id: int
-    node_depth: int
-    cumulative_log_probability: float
-    hidden: torch.Tensor
-    kv: Any
-
-
 def _compact_tree_by_score(
     token_ids: List[int],
     parent: List[int],
@@ -150,115 +137,6 @@ def _compact_tree_by_score(
         for old_index in ordered_old_indices
     ]
     return TreeLayout(token_ids=compacted_token_ids, parent=compacted_parent)
-
-
-def _expand_draft_tree_eagle2_ar(
-    cfg: Eagle3SglConfig,
-    draft_model,
-    root_logits: torch.Tensor,
-    root_hidden: torch.Tensor,
-    root_kv,
-    draft_kv_length: int,
-    *,
-    device: torch.device,
-    rope_delta: int = 0,
-) -> TreeLayout:
-    """EAGLE2 累计分数 beam + EAGLE3 AR hidden/KV.
-
-    每层只让累计分最高的 topk 条路径继续扩展. 展开后再按分数剪到
-    max_tree_nodes. verify 只看到最终 TreeLayout, 因此接受逻辑不变.
-    """
-    topk = cfg.topk
-    if topk < 1 or cfg.max_tree_nodes < 1:
-        raise ValueError("invalid topk/max_tree_nodes")
-    beam_width = min(topk, cfg.max_tree_nodes)
-
-    token_ids: List[int] = []
-    parent: List[int] = []
-    cumulative_log_probabilities: List[float] = []
-
-    root_topk_ids, root_topk_log_probabilities = _topk_target_log_probs(
-        draft_model, root_logits, beam_width
-    )
-    root_token_ids = root_topk_ids[0].tolist()
-    root_log_probabilities = root_topk_log_probabilities[0].tolist()
-
-    frontier: List[_FrontierNode] = []
-    for token_id, log_probability in zip(root_token_ids, root_log_probabilities):
-        node_index = len(token_ids)
-        token_ids.append(int(token_id))
-        parent.append(-1)
-        cumulative_log_probabilities.append(float(log_probability))
-        # 根层所有节点共享同一个 target 条件 hidden 和 draft KV.
-        frontier.append(
-            _FrontierNode(
-                tree_index=node_index,
-                token_id=int(token_id),
-                node_depth=1,
-                cumulative_log_probability=float(log_probability),
-                hidden=root_hidden,
-                kv=root_kv,
-            )
-        )
-
-    for _ in range(1, cfg.num_steps):
-        if not frontier:
-            break
-        candidates: List[_FrontierNode] = []
-
-        for frontier_node in frontier:
-            draft_input_ids = torch.tensor(
-                [[frontier_node.token_id]], device=device, dtype=torch.long
-            )
-            child_logits, child_hidden, child_kv = draft_model.step(
-                draft_input_ids,
-                frontier_node.hidden,
-                frontier_node.kv,
-                draft_kv_length + frontier_node.node_depth - 1 + rope_delta,
-            )
-            child_topk_ids, child_topk_log_probabilities = _topk_target_log_probs(
-                draft_model, child_logits, beam_width
-            )
-            child_token_ids = child_topk_ids[0].tolist()
-            child_log_probabilities = child_topk_log_probabilities[0].tolist()
-
-            for child_token_id, child_log_probability in zip(
-                child_token_ids, child_log_probabilities
-            ):
-                child_index = len(token_ids)
-                child_depth = frontier_node.node_depth + 1
-                child_cumulative_log_probability = (
-                    frontier_node.cumulative_log_probability
-                    + float(child_log_probability)
-                )
-                token_ids.append(int(child_token_id))
-                parent.append(frontier_node.tree_index)
-                cumulative_log_probabilities.append(child_cumulative_log_probability)
-                # 同一父节点的 topk children 共享父步产生的 hidden 和 KV.
-                # 下一步再用各自 token 分化.
-                candidates.append(
-                    _FrontierNode(
-                        tree_index=child_index,
-                        token_id=int(child_token_id),
-                        node_depth=child_depth,
-                        cumulative_log_probability=child_cumulative_log_probability,
-                        hidden=child_hidden,
-                        kv=child_kv,
-                    )
-                )
-
-        # 稳定排序: 分数相同时保留先创建的候选, 保证结果可复现.
-        candidates.sort(
-            key=lambda candidate: candidate.cumulative_log_probability, reverse=True
-        )
-        frontier = candidates[:beam_width]
-
-    return _compact_tree_by_score(
-        token_ids,
-        parent,
-        cumulative_log_probabilities,
-        cfg.max_tree_nodes,
-    )
 
 
 def _expand_draft_tree_eagle2_batch_ar(
@@ -380,20 +258,9 @@ def expand_draft_tree_ar(
     device: torch.device,
     rope_delta: int = 0,
 ) -> TreeLayout:
-    """按配置选择 EAGLE2 累计分数树或原 BFS 树."""
+    """按配置选择 EAGLE2 累计分数树(batch)或原 BFS 树."""
     if cfg.draft_tree_mode == "eagle2_batch":
         return _expand_draft_tree_eagle2_batch_ar(
-            cfg,
-            draft_model,
-            root_logits,
-            root_hidden,
-            root_kv,
-            draft_kv_length,
-            device=device,
-            rope_delta=rope_delta,
-        )
-    if cfg.draft_tree_mode == "eagle2":
-        return _expand_draft_tree_eagle2_ar(
             cfg,
             draft_model,
             root_logits,

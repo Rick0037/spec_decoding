@@ -315,8 +315,8 @@ def main() -> None:
     parser.add_argument(
         "--tree-mode",
         default="eagle2_batch",
-        choices=["eagle2", "eagle2_batch", "bfs"],
-        help="eagle2=逐节点 beam, eagle2_batch=按层 batch beam, bfs=原 BFS",
+        choices=["eagle2_batch", "bfs"],
+        help="eagle2_batch=按层 batch beam, bfs=原 BFS",
     )
     parser.add_argument(
         "--preconsume",
@@ -337,12 +337,6 @@ def main() -> None:
         help="在 skip_replay 基础上用 StaticCache + verify CUDA graph; --no-cuda-graph 走 DynamicCache",
     )
     parser.add_argument("--verify-backend", default="triton_tree")
-    parser.add_argument(
-        "--verify-mode",
-        default="full_model_tree",
-        choices=["full_model_tree", "reference_paths"],
-        help="reference_paths 用逐路径 causal forward 做对照, 慢但可排除树掩码/位置的嫌疑",
-    )
     command_line_args = parser.parse_args()
 
     mode = command_line_args.mode
@@ -388,7 +382,6 @@ def main() -> None:
         preconsume_first_token=command_line_args.preconsume,
         skip_replay=command_line_args.skip_replay,
         decode_cuda_graph=command_line_args.cuda_graph,
-        verify_mode=command_line_args.verify_mode,
         verify_attn_backend=command_line_args.verify_backend,
     )
     eagle_layers = config.resolve_eagle_layers(num_hidden_layers)

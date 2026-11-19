@@ -23,7 +23,7 @@ Extend Attention:在一次 attention 里,让 「本步新写入的 Q(extend 段)
 结论:
 
 - 从 算子语义 上:同时覆盖 「有 prefix 的多 token 计算」(常被叫 extend prefill)和 `extend_len=1` 的 decode 步。
-- 从 spec_decoding 用途 上:当前只在 EAGLE1 的 `verify_mode=full_model_tree` 且 `verify_attn_backend` 解析为 `triton_tree`(`topk>1` 且 Triton 可用)时调用(见 `tree_verify_attn.py`),一次 forward 过 `L` 个 draft 节点(`extend_len = L`);EAGLE1 默认/测试用的 `reference_paths` 与 `eager`/`flash_attn` 后端不走本 kernel。
+- 从 spec_decoding 用途 上:EAGLE3(`eagle3_sgl`)默认 `verify_attn_backend=triton_tree` 时调用(见 `tree_verify_attn.py`),一次 forward 过 `L` 个 draft 节点(`extend_len = L`);`decode_cuda_graph` 路径固定 SDPA 树 mask,不走本 kernel。EAGLE1 在 `verify_mode=full_model_tree` 且解析为 `triton_tree` 时调用;`reference_paths` 与 `eager`/`flash_attn` 后端不走本 kernel。
 
 ---
 

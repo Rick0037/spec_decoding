@@ -91,13 +91,12 @@ python3 -m spec_decoding.eagle3_sgl.example.run_smoke_eagle3_sgl --device cpu
 | target | meta-llama/Llama-3.1-8B-Instruct,无 HF token 时自动回退到 NousResearch/Meta-Llama-3.1-8B-Instruct |
 | draft | yuhuili/EAGLE3-LLaMA3.1-Instruct-8B(含 fc / midlayer / norm / lm_head / d2t) |
 
-推荐用下面这条命令跑端到端,verify 走 reference_paths,96 token 无损通过:
+推荐用下面这条命令跑端到端(树掩码 verify),96 token 无损通过:
 
 ```bash
 cd /home/spec-decoding/spec_decoding/eagle3_sgl
 CUDA_VISIBLE_DEVICES=1 python3 -m spec_decoding.eagle3_sgl.example.run_eagle3_sgl_llama31 \
-    --max-new-tokens 96 --topk 4 --num-steps 4 --max-tree-nodes 24 \
-    --dtype bfloat16 --verify-mode reference_paths
+    --max-new-tokens 96
 ```
 
 2026-07-28 实测(单张 H100,成功):
@@ -110,12 +109,13 @@ CUDA_VISIBLE_DEVICES=1 python3 -m spec_decoding.eagle3_sgl.example.run_eagle3_sg
 [eagle3-e2e] OK (lossless)
 ```
 
-结尾出现 OK (lossless) 即为端到端通过。reference_paths 是逐叶干净前向,慢但最稳;
-它的 spec_tok/s 只有参考意义,要看吞吐请用下面的 full_model_tree。
+结尾出现 OK (lossless) 即为端到端通过。verify 固定为树掩码 extend verify
+(full_model_tree,复用前缀 KV 一次前向 L 个树节点);早期 reference_paths
+逐叶对照模式已删除,上面 2026-07-28 的记录仅作历史参考。
 
 ```bash
 CUDA_VISIBLE_DEVICES=1 python3 -m spec_decoding.eagle3_sgl.example.run_eagle3_sgl_llama31 \
-    --max-new-tokens 48 --topk 4 --num-steps 4 --max-tree-nodes 24 --dtype bfloat16
+    --max-new-tokens 48
 ```
 
 实测(成功):
@@ -126,18 +126,17 @@ CUDA_VISIBLE_DEVICES=1 python3 -m spec_decoding.eagle3_sgl.example.run_eagle3_sg
 [eagle3-e2e] OK (lossless)
 ```
 
-perf.log 默认写在当前 cwd;也可以用 --perf-log 指定绝对路径。
+perf.log 固定写在当前 cwd。树超参(topk=8 / num_steps=8 / max_tree_nodes=64)和
+dtype=float16 在脚本内固定;要调参请用 bench_accept_tpot.py。
 
 常用参数:
 
 | 参数 | 说明 |
 |------|------|
-| --verify-mode | full_model_tree(树掩码 verify,快)或 reference_paths(逐叶干净前向,慢但无损) |
-| --topk / --num-steps / --max-tree-nodes | 树的宽度、深度、节点上限,默认 8 / 8 / 64 |
-| --no-autoregressive-draft | 关掉 KV cache 自回归 draft,回退单 token draft |
-| --tree-expand-mode | cumulative(默认);static 在 AR draft 下被忽略 |
-| --dtype | float16(默认)/ bfloat16 / float32 |
-| --perf-log | 性能记录路径,默认 cwd 下 perf.log |
+| --target | target 模型,默认 meta-llama/Llama-3.1-8B-Instruct |
+| --eagle3-draft | draft 权重,默认 yuhuili/EAGLE3-LLaMA3.1-Instruct-8B |
+| --prompt | 输入 prompt |
+| --max-new-tokens | 生成上限,默认 96 |
 
 ---
 

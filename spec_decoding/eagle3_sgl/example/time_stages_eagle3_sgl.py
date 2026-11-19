@@ -79,9 +79,8 @@ def main():
     p.add_argument("--num-steps", type=int, default=8)
     p.add_argument("--max-tree-nodes", type=int, default=64)
     p.add_argument(
-        "--tree-mode", default="eagle2_batch", choices=["eagle2", "eagle2_batch", "bfs"]
+        "--tree-mode", default="eagle2_batch", choices=["eagle2_batch", "bfs"]
     )
-    p.add_argument("--verify-mode", default="full_model_tree")
     p.add_argument("--verify-attn-backend", default="triton_tree")
     p.add_argument("--dtype", default="float16")
     p.add_argument("--report-out", default="")
@@ -118,7 +117,6 @@ def main():
         num_steps=args.num_steps,
         max_tree_nodes=args.max_tree_nodes,
         draft_tree_mode=args.tree_mode,
-        verify_mode=args.verify_mode,
         verify_attn_backend=args.verify_attn_backend,
     )
     eagle_layers = cfg.resolve_eagle_layers(n_layers)

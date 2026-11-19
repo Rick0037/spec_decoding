@@ -260,6 +260,8 @@ EAGLE2 风格可以改为：
 
 随后新增 `eagle2_batch` 实验路径：每层 frontier 只做一次 batch draft forward，在 GPU 上完成累计分数和全局 beam topk，再用 index_select 重排 AR hidden/KV，整棵树结束后统一 D2H。合成测试中 serial 与 batch 得到相同 TreeLayout；topk=2、num_steps=4 时，serial 为 6 次单节点 forward，batch 降为 3 次 batch=2 forward。真实 VL 上仍需比较 bfs、eagle2、eagle2_batch 三组，批量版不预设必然更快。
 
+后续简化：逐节点 `eagle2` 建树分支与 `verify_mode` 开关（含 `reference_paths` 对照模式）已删除，`draft_tree_mode` 仅保留 `eagle2_batch`（默认）/ `bfs`，verify 固定为树掩码 extend verify。
+
 ### 6.2 draft 预消费 target 已确定的 token 与末位 feature
 
 #### 方案

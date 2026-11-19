@@ -115,7 +115,6 @@ def main() -> None:
         topk=8,
         num_steps=8,
         max_tree_nodes=64,
-        verify_mode="full_model_tree",
         verify_attn_backend=command_line_args.verify_backend,
     )
     eagle_layers = config.resolve_eagle_layers(num_hidden_layers)

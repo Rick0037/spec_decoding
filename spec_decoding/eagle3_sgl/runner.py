@@ -10,14 +10,11 @@ EAGLE3 外层调度:target 多层 act 条件 draft + 树 + verify → 多步生�
       └─ loop:
            generate_step_payload()
              ├─ _build_tree() → expand_draft_tree_ar
-             └─ verify:
-                  full_tree_verify_extend|triton  (verify_mode=full_model_tree)
-                  或 _verify_path_clean * 叶子数   (verify_mode=reference_paths)
+             └─ verify: full_tree_verify_extend|triton
            target replay append → 更新 past / recovery_logits / acts_all
            draft_model.extend_tokens() → 更新 draft_state(AR 路径)
 
-verify_mode=full_model_tree(默认):extend verify,复用前缀 KV,树掩码一次前向 L 节点。
-verify_mode=reference_paths:逐叶干净前向,实现简单、便于对照。
+verify 固定为 extend verify:复用前缀 KV,树掩码一次前向 L 节点。
 """
 
 from __future__ import annotations
@@ -83,87 +80,6 @@ def _leaf_indices(parent: List[int]) -> List[int]:
         if p >= 0:
             has_ch[p] = True  # 标记 p 有孩子
     return [i for i in range(n) if not has_ch[i]]
-
-
-def _path_tokens_to_leaf(parent: List[int], tok: List[int], leaf: int) -> List[int]:
-    """从某叶子沿 parent 指针回溯到根,返回 根→叶 顺序的 token 列表."""
-    out: List[int] = []
-    k = leaf
-    while k >= 0:
-        out.append(tok[k])
-        k = parent[k]
-    out.reverse()  # 回溯是叶→根,反转成根→叶
-    return out
-
-
-# -----------------------------------------------------------------------------
-# Verify(参考实现, 串行verify):用 一次干净整段前向(无共享增量 KV)核对一条 draft 路径.
-# 位置对齐:logits[P-1+j] 是 path[j] 所在位置的 target greedy 预测:
-#   - path[0] 的真值 = logits[P-1];
-#   - 全中时 bonus = logits[P-1+len(path)].
-# 用 use_cache=False 避免 HF DynamicCache 原地修改(把被拒绝的续写留进缓存).
-# -----------------------------------------------------------------------------
-@torch.inference_mode()
-def _verify_path_clean(
-    target_m: PreTrainedModel,
-    full_prefix_ids: torch.LongTensor,
-    path_tokens: List[int],
-    device: torch.device,
-) -> Tuple[int, int]:
-    """对 prefix + path 做一次干净前向,返回 (match_len, next_token)。
-
-    Parameters
-    ----------
-    target_m
-        完整 HF CausalLM(带 lm_head)。
-    full_prefix_ids
-        当前已接受前缀 [1, P](prompt + 此前各轮 append)。
-    path_tokens
-        某条 draft 叶路径上的 token 列表(根→叶);空列表表示无前向 path,只取 greedy 下一 token。
-    device
-        计算设备。
-
-    Returns
-    -------
-    match_len
-        path 上连续被 target greedy 接受的长度。
-    next_token
-        全中时 = bonus(logits[P-1+len(path)] 的 argmax);否则 = 首个不匹配处 target 修正 token。
-    """
-    if not path_tokens:
-        out = target_m(
-            full_prefix_ids,
-            attention_mask=torch.ones_like(full_prefix_ids, device=device),
-            use_cache=False,
-        )
-        return 0, int(out.logits[0, -1, :].argmax(dim=-1).item())
-
-    P = int(full_prefix_ids.shape[1])
-    # 整段 [prefix | path] 一次 forward;不写入 runner 的 past(use_cache=False)
-    full = torch.cat(
-        [full_prefix_ids, torch.tensor([path_tokens], device=device, dtype=torch.long)],
-        dim=1,
-    )
-    logits = target_m(
-        full,
-        attention_mask=torch.ones_like(full, device=device),
-        use_cache=False,
-    ).logits[0]
-    # logits[P-1+j] = 在已见 prefix + path[:j]条件下对 path[j] 的预测
-    mlen = 0
-    corr: Optional[int] = None
-    for j, t in enumerate(path_tokens):
-        g = int(logits[P - 1 + j].argmax(dim=-1).item())
-        if g == t:
-            mlen += 1
-        else:
-            corr = g
-            break
-    if mlen == len(path_tokens):
-        nxt = int(logits[P - 1 + len(path_tokens)].argmax(dim=-1).item())  # bonus
-    else:
-        nxt = int(corr)
-    return mlen, nxt
 
 
 @dataclass
@@ -288,67 +204,37 @@ class Eagle3SglGenerator:
         past_len = int(full_prefix_ids.shape[1])
         # * 找到所有的叶子节点
         leaves = _leaf_indices(layout.parent)
-        # 退化:树只有空或无叶节点时,等价于投机解码失败,直接 target生成下一 token
-        if not leaves:
-            _, nxt = _verify_path_clean(self.target_m, full_prefix_ids, [], device)
-            return torch.tensor([[nxt]], device=device, dtype=torch.long)
-        if self.cfg.verify_mode == "full_model_tree":
-            if recovery_logits is None:
-                raise ValueError("full_model_tree verify requires recovery_logits")
-            # 复用前缀 KV 的 extend verify(只前向 L 个树节点,不重算前缀);
-            # backend=triton_tree(或 auto+topk>1+triton 可用)→ Triton 树注意力 kernel;否则走HF自带的torch sdpa.
-            backend = self.cfg.verify_attn_backend
-            # auto 选 triton 还需 target 真在 GPU 上:triton_extend_available 只看
-            # 机器有无 CUDA,不看张量设备,CPU 模型会误入 triton 路径。
-            target_on_cuda = next(self.target_m.parameters()).device.type == "cuda"
-            use_triton = backend == "triton_tree" or (
-                backend == "auto"
-                and self.cfg.topk > 1
-                and target_on_cuda
-                and triton_extend_available()
+        if recovery_logits is None:
+            raise ValueError("full_model_tree verify requires recovery_logits")
+        # 复用前缀 KV 的 extend verify(只前向 L 个树节点,不重算前缀);
+        # backend=triton_tree(或 auto+topk>1+triton 可用)→ Triton 树注意力 kernel;否则走HF自带的torch sdpa.
+        backend = self.cfg.verify_attn_backend
+        # auto 选 triton 还需 target 真在 GPU 上:triton_extend_available 只看
+        # 机器有无 CUDA,不看张量设备,CPU 模型会误入 triton 路径。
+        target_on_cuda = next(self.target_m.parameters()).device.type == "cuda"
+        use_triton = backend == "triton_tree" or (
+            backend == "auto"
+            and self.cfg.topk > 1
+            and target_on_cuda
+            and triton_extend_available()
+        )
+        verify_fn = (
+            full_tree_verify_triton if use_triton else full_tree_verify_extend
+        )
+        # * layout 还没有进行剪枝, 非常大
+        with _prof("stage:target_verify"):
+            append_list, proposed_draft_tokens = verify_fn(
+                self.target_m,
+                layout,
+                past_before,  # * 实际 past kv cache的数据结构
+                past_len,
+                recovery_logits,
+                leaves=leaves,
+                device=device,
+                rope_delta=self._rope_delta,
             )
-            verify_fn = (
-                full_tree_verify_triton if use_triton else full_tree_verify_extend
-            )
-            # import pdb
-
-            # pdb.set_trace()
-            # * layout 还没有进行剪枝, 非常大
-            with _prof("stage:target_verify"):
-                append_list, proposed_draft_tokens = verify_fn(
-                    self.target_m,
-                    layout,
-                    past_before,  # * 实际 past kv cache的数据结构
-                    past_len,
-                    recovery_logits,
-                    leaves=leaves,
-                    device=device,
-                    rope_delta=self._rope_delta,
-                )
-            if draft_state.confirmed_root_token is not None:
-                # 确定根节点不是 draft 提议, 不计入 proposed 统计.
-                proposed_draft_tokens -= 1
-            self.n_proposed_draft_tokens += proposed_draft_tokens
-            return torch.tensor([append_list], device=device, dtype=torch.long)
-
-        # reference_paths:每条叶路径一次完整 causal forward(串行verify),选 match 最长的叶(慢,易对照)
-        best_m = -1
-        best_next = 0
-        best_leaf = 0
-        for leaf in leaves:
-            path = _path_tokens_to_leaf(layout.parent, layout.token_ids, leaf)
-            with _prof("stage:target_verify"):
-                mlen, nxt = _verify_path_clean(
-                    self.target_m, full_prefix_ids, path, device
-                )
-            # 接受数相同时保留排在前面的路径(与 extend verify 一致)
-            if mlen > best_m:
-                best_m, best_next, best_leaf = mlen, nxt, leaf
-
-        path = _path_tokens_to_leaf(layout.parent, layout.token_ids, best_leaf)
-        append_list = path[:best_m] + [best_next]
-        proposed_draft_tokens = len(path)
         if draft_state.confirmed_root_token is not None:
+            # 确定根节点不是 draft 提议, 不计入 proposed 统计.
             proposed_draft_tokens -= 1
         self.n_proposed_draft_tokens += proposed_draft_tokens
         return torch.tensor([append_list], device=device, dtype=torch.long)

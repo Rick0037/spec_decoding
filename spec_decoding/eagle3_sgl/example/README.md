@@ -79,7 +79,7 @@ python3 -m spec_decoding.eagle3_sgl.example.run_smoke_eagle3_sgl --device cpu
 
 | 模块 | 作用简述 | 典型命令 |
 |------|----------|----------|
-| `run_smoke_eagle3_sgl` | 最小冒烟:小 GPT-2 + 随机 draft + `reference_paths` verify,可 CPU。 | `python3 -m spec_decoding.eagle3_sgl.example.run_smoke_eagle3_sgl --device cpu` |
+| `run_smoke_eagle3_sgl` | 最小冒烟:小 GPT-2 + 随机 draft + 树掩码 verify,可 CPU。 | `python3 -m spec_decoding.eagle3_sgl.example.run_smoke_eagle3_sgl --device cpu` |
 | `run_eagle3_sgl_llama31` | 真 EAGLE3:Llama-3.1-8B + Hub draft;`--perf-log`(默认 `perf.log`)写在 cwd。 | `python3 -m spec_decoding.eagle3_sgl.example.run_eagle3_sgl_llama31 --max-new-tokens 96 --device cuda` |
 | `run_mtbench_eagle3_sgl` | MT-Bench 风格吞吐;题目默认 `eagle3_sgl/example/mtbench/question.jsonl`。 | `python3 -m spec_decoding.eagle3_sgl.example.run_mtbench_eagle3_sgl --num-questions 10 --max-new-tokens 256 --skip-baseline` |
 | `profile_eagle3_sgl` | `torch.profiler`;`--trace-out` 建议写到 example 下(相对 **eagle3_sgl 目录**):`example/eagle3_trace.json`。 | `python3 -m spec_decoding.eagle3_sgl.example.profile_eagle3_sgl --max-new-tokens 128 --trace-out example/eagle3_trace.json` |

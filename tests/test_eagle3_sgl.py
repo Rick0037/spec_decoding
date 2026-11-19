@@ -28,11 +28,11 @@ class TestEagle3SglConfigCpu(unittest.TestCase):
         cfg = Eagle3SglConfig(eagle_layers=[0, 1])
         self.assertEqual(cfg.resolve_eagle_layers(2), [0, 1])
 
-    def test_invalid_verify_mode(self) -> None:
+    def test_invalid_tree_mode(self) -> None:
         from spec_decoding.eagle3_sgl import Eagle3SglConfig
 
         with self.assertRaises(ValueError):
-            Eagle3SglConfig(verify_mode="nope")
+            Eagle3SglConfig(draft_tree_mode="nope")
 
 
 @unittest.skipUnless(_RUN, "set RUN_SPEC_E2E=1 to run the eagle3_sgl model test")
@@ -157,7 +157,6 @@ class TestEagle3Sgl(unittest.TestCase):
             num_steps=2,
             max_tree_nodes=8,
             eagle_layers=self.eagle_layers,
-            verify_mode="full_model_tree",
         )
         layers = cfg.resolve_eagle_layers(self.n_layers)
         draft = build_eagle3_sgl_draft(self.target, layers)

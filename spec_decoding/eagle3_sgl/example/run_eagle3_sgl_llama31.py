@@ -89,7 +89,6 @@ def main() -> None:
         topk=8,
         num_steps=8,
         max_tree_nodes=64,
-        verify_mode="full_model_tree",
         verify_attn_backend="auto",
     )
     # * 默认 [2, L//2, L-3] -> [2, 16, 29]
