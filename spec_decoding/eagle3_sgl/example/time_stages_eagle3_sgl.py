@@ -81,7 +81,9 @@ def main():
     p.add_argument(
         "--tree-mode", default="eagle2_batch", choices=["eagle2_batch", "bfs"]
     )
-    p.add_argument("--verify-attn-backend", default="triton_tree")
+    p.add_argument(
+        "--verify-attn-backend", default="triton_tree", choices=["triton_tree", "eager"]
+    )
     p.add_argument("--dtype", default="float16")
     p.add_argument("--report-out", default="")
     args = p.parse_args()

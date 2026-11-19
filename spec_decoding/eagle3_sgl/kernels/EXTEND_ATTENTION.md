@@ -228,7 +228,7 @@ Patch 层(`tree_verify_attn.py`)负责:
 3. 填入 `TritonTreeVerifyMetadata`(indptr、mask)  
 4. 调用本 kernel,再 `o_proj`
 
-未走本 kernel 时:`verify_attn_backend=eager` 用 HF forward + 4D 树 mask patch;`flash_attn` 在 `topk=1` 用官方 FA2。
+未走本 kernel 时:`verify_attn_backend=eager` 用 HF sdpa + 4D 树 cross mask(EAGLE1 另有 `flash_attn` 后端,在 `topk=1` 用官方 FA2)。
 
 ---
 

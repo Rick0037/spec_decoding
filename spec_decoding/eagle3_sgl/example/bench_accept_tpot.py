@@ -336,7 +336,9 @@ def main() -> None:
         default=False,
         help="在 skip_replay 基础上用 StaticCache + verify CUDA graph; --no-cuda-graph 走 DynamicCache",
     )
-    parser.add_argument("--verify-backend", default="triton_tree")
+    parser.add_argument(
+        "--verify-backend", default="triton_tree", choices=["triton_tree", "eager"]
+    )
     command_line_args = parser.parse_args()
 
     mode = command_line_args.mode

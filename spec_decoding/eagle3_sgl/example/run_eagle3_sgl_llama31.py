@@ -89,7 +89,7 @@ def main() -> None:
         topk=8,
         num_steps=8,
         max_tree_nodes=64,
-        verify_attn_backend="auto",
+        verify_attn_backend="triton_tree",
     )
     # * 默认 [2, L//2, L-3] -> [2, 16, 29]
     eagle_layers = cfg.resolve_eagle_layers(n_layers)

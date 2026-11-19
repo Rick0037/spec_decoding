@@ -321,8 +321,8 @@ def main() -> None:
     p.add_argument("--max-tree-nodes", type=int, default=64)
     p.add_argument(
         "--verify-attn-backend",
-        default="auto",
-        choices=["auto", "eager", "flash_attn", "triton_tree"],
+        default="triton_tree",
+        choices=["triton_tree", "eager"],
     )
     p.add_argument("--device", default="cuda")
     p.add_argument(

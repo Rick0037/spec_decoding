@@ -26,7 +26,7 @@
 
 - **Top-k > 1 树形 draft**:每步保留 K 个分支,一次 verify 多条候选路径。
 - **verify 模式**:EAGLE2 有 `full_model_tree`(extend verify)与 `reference_paths`(逐叶干净前向,作对照);EAGLE3 固定 `full_model_tree`,`reference_paths` 已删除。
-- **verify 后端**:`verify_attn_backend ∈ {auto, eager, flash_attn, triton_tree}`。
+- **verify 后端**:EAGLE2 `verify_attn_backend ∈ {auto, eager, flash_attn, triton_tree}`;EAGLE3 仅 `{triton_tree(默认), eager}`,开 `decode_cuda_graph` 时强制 eager。
 - **extend verify 路径**(Runner 实际调用):
   ```text
   full_model_tree

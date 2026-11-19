@@ -207,14 +207,13 @@ class Eagle3SglGenerator:
         if recovery_logits is None:
             raise ValueError("full_model_tree verify requires recovery_logits")
         # 复用前缀 KV 的 extend verify(只前向 L 个树节点,不重算前缀);
-        # backend=triton_tree(或 auto+topk>1+triton 可用)→ Triton 树注意力 kernel;否则走HF自带的torch sdpa.
+        # backend=triton_tree → Triton 树注意力 kernel;否则走 HF 自带的 torch sdpa.
         backend = self.cfg.verify_attn_backend
-        # auto 选 triton 还需 target 真在 GPU 上:triton_extend_available 只看
+        # triton 还需 target 真在 GPU 上且 kernel 可用:triton_extend_available 只看
         # 机器有无 CUDA,不看张量设备,CPU 模型会误入 triton 路径。
         target_on_cuda = next(self.target_m.parameters()).device.type == "cuda"
-        use_triton = backend == "triton_tree" or (
-            backend == "auto"
-            and self.cfg.topk > 1
+        use_triton = (
+            backend == "triton_tree"
             and target_on_cuda
             and triton_extend_available()
         )
@@ -544,9 +543,8 @@ class Eagle3SglGenerator:
         # 与 generate_step_payload 相同的 backend 选择逻辑.
         backend = self.cfg.verify_attn_backend
         target_on_cuda = next(self.target_m.parameters()).device.type == "cuda"
-        use_triton = backend == "triton_tree" or (
-            backend == "auto"
-            and self.cfg.topk > 1
+        use_triton = (
+            backend == "triton_tree"
             and target_on_cuda
             and triton_extend_available()
         )

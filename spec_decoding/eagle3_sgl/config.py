@@ -42,14 +42,13 @@ class Eagle3SglConfig:
     """StaticCache 容量余量: prompt + max_new_tokens + max_tree_nodes + 1 + margin."""
     eagle_layers: Optional[List[int]] = None
     """作为 draft 条件的 target 多层 hidden 下标;None 时用 default_eagle_layers。"""
-    verify_attn_backend: str = "auto"
+    verify_attn_backend: str = "triton_tree"
     """
-    full_model_tree 时 target attention 后端:
+    树 verify 的 target attention 后端:
 
-    - auto:topk==1 且可用 → flash_attn;topk>1 且 Triton 可用 → triton_tree;否则 eager。
-    - flash_attn:HF flash_attention_2(链式因果,不叠树 mask)。
-    - triton_tree:Triton extend_attention_fwd + custom_mask。
-    - eager:target_m.forward + 树 mask patch + 临时 eager。
+    - triton_tree(默认):Triton extend_attention_fwd + custom_mask。
+    - eager:HF sdpa + 4D 树 cross mask。
+    decode_cuda_graph 开启时强制 eager(graph 路径固定 SDPA)。
     """
 
     def __post_init__(self) -> None:
@@ -66,15 +65,10 @@ class Eagle3SglConfig:
             raise ValueError("decode_cuda_graph requires skip_replay")
         if self.graph_cache_margin < 0:
             raise ValueError("graph_cache_margin must be >= 0")
-        if self.verify_attn_backend not in (
-            "auto",
-            "eager",
-            "flash_attn",
-            "triton_tree",
-        ):
-            raise ValueError(
-                "verify_attn_backend must be auto, eager, flash_attn, or triton_tree"
-            )
+        if self.verify_attn_backend not in ("eager", "triton_tree"):
+            raise ValueError("verify_attn_backend must be eager or triton_tree")
+        if self.decode_cuda_graph:
+            self.verify_attn_backend = "eager"
 
     def resolve_eagle_layers(self, num_hidden_layers: int) -> List[int]:
         """返回配置的或默认的 eagle_layers(并校验下标在 [0, num_hidden_layers) 内)."""
