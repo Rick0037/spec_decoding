@@ -401,6 +401,19 @@ class Eagle3SglGenerator:
         acts_all = select_eagle_acts_from_hidden_states(
             prefill_outputs.hidden_states, self.eagle_layers, last_token_only=False
         )
+        draft_state = self._init_draft_state(
+            input_ids, acts_all, recovery_logits, draft_position_ids
+        )
+        return past, recovery_logits, acts_all, draft_state
+
+    def _init_draft_state(
+        self,
+        input_ids: torch.LongTensor,
+        acts_all: torch.Tensor,
+        recovery_logits: torch.Tensor,
+        draft_position_ids: Optional[torch.Tensor],
+    ) -> _DraftKvState:
+        """draft prefill + 可选预消费, 建立首轮 draft 状态. eager/static 两条路径共用."""
         # *------first init------
         # * acts_all `[B, S, n_acts*H]`，本脚本是 `[1, prompt_len, 3*4096]`
         # （Llama-3.1-8B，`eagle_layers=[2, 16, 29]`）。
@@ -432,14 +445,13 @@ class Eagle3SglGenerator:
                 confirmed_root_token = first_target_token
                 draft_prefix_length += 1
         # * prefill得初始状态
-        draft_state = _DraftKvState(
+        return _DraftKvState(
             kv=draft_kv,
             prefix_len=draft_prefix_length,
             root_logits=draft_logits,
             root_hidden=draft_hidden,
             confirmed_root_token=confirmed_root_token,
         )
-        return past, recovery_logits, acts_all, draft_state
 
     def _update_target_after_verify(
         self,
@@ -562,6 +574,13 @@ class Eagle3SglGenerator:
         """
         generate 主流程, prefill target -> prefill draft
         """
+        if self.cfg.decode_cuda_graph:
+            return self._generate_static_graph(
+                input_ids,
+                max_new_tokens=max_new_tokens,
+                eos_token_id=eos_token_id,
+                multimodal_inputs=multimodal_inputs,
+            )
         if self.cfg.skip_replay:
             return self._generate_no_replay(
                 input_ids,
@@ -687,6 +706,168 @@ class Eagle3SglGenerator:
             self.n_proposed_draft_tokens += proposed_draft_tokens
             append = torch.tensor([append_list], device=device, dtype=torch.long)
             # 接受节点的 feature 直接并入 acts_all, 无需 replay 重算.
+            acts_all = torch.cat([acts_all, accepted_features], dim=1)
+            draft_state = self._update_draft_after_verify(append, acts_all, draft_state)
+            if pending_in_out_ids:
+                new_tokens = append[:, 1:]  # pending 已在 out_ids 里, 不重复追加
+            else:
+                new_tokens = append
+            out_ids = torch.cat([out_ids, new_tokens], dim=1)
+            num_new_tokens += int(new_tokens.numel())
+            self.n_rounds += 1
+            self.n_accepted_tokens += int(new_tokens.numel())
+            pending_in_out_ids = True
+            if eos_token_id is not None and (new_tokens == eos_token_id).any():
+                break
+        return out_ids
+
+    # ------------------------------------------------------------------
+    # StaticCache + verify CUDA graph 路径: 在 skip_replay 基础上, 每轮唯一的
+    # target forward(verify+hidden)走捕获好的 graph replay, commit 仍 eager.
+    # ------------------------------------------------------------------
+    @torch.inference_mode()
+    def _generate_static_graph(
+        self,
+        input_ids: torch.LongTensor,
+        *,
+        max_new_tokens: int,
+        eos_token_id: Optional[int] = None,
+        multimodal_inputs: Optional[dict] = None,
+    ) -> torch.LongTensor:
+        """无 replay + StaticCache + verify CUDA graph 生成.
+
+        稳态不变量与 _generate_no_replay 相同; 区别是 target KV 用固定容量
+        StaticCache, verify 前向 padding 到固定 L 后 graph replay, 省掉逐 kernel
+        launch 开销. 写入指针由 rollback_static_cache 显式控制.
+        """
+        from .target_graph import (
+            StaticGraphCommitVerifier,
+            make_static_cache,
+        )
+
+        device = input_ids.device
+        dtype = next(self.target_m.parameters()).dtype
+        out_ids = input_ids.clone()
+        prompt_length = int(out_ids.shape[1])
+        # 稳态树 = 1 个 pending 确定根 + 至多 max_tree_nodes 个 draft 节点.
+        capture_tree_nodes = int(self.cfg.max_tree_nodes) + 1
+        # 容量: 前缀 + 新 token + verify 临时树 slot + 余量.
+        required_length = (
+            prompt_length
+            + max_new_tokens
+            + capture_tree_nodes
+            + int(self.cfg.graph_cache_margin)
+        )
+        # static cache + graph 跨 generate() 复用, 避免每次重新分配和捕获.
+        sg = getattr(self, "_sg_state", None)
+        if (
+            sg is None
+            or sg["max_len"] < required_length
+            or sg["capture_tree_nodes"] != capture_tree_nodes
+        ):
+            static_cache = make_static_cache(
+                self.target_m.config, required_length, device, dtype
+            )
+            verifier = StaticGraphCommitVerifier(
+                self.target_m,
+                static_cache,
+                required_length,
+                device,
+                dtype,
+                capture_tree_nodes=capture_tree_nodes,
+                enable_graph=bool(self.cfg.graph_capture),
+            )
+            self._sg_state = {
+                "sc": static_cache,
+                "verifier": verifier,
+                "max_len": required_length,
+                "capture_tree_nodes": capture_tree_nodes,
+            }
+        else:
+            static_cache = sg["sc"]
+            verifier = sg["verifier"]
+            static_cache.reset()
+
+        # ② target prefill: 写入 static cache, 取末位 logits + 全前缀 act.
+        prefill_attention_mask = torch.ones_like(input_ids, device=device)
+        draft_position_ids = None
+        prefill_kwargs = {}
+        if multimodal_inputs is not None:
+            position_ids, rope_deltas = self.target_m.model.get_rope_index(
+                input_ids,
+                multimodal_inputs["mm_token_type_ids"],
+                image_grid_thw=multimodal_inputs.get("image_grid_thw"),
+                attention_mask=prefill_attention_mask,
+            )
+            self._rope_delta = int(rope_deltas.flatten()[0].item())
+            draft_position_ids = position_ids
+            prefill_kwargs["position_ids"] = position_ids
+            prefill_kwargs.update(multimodal_inputs)
+        else:
+            self._rope_delta = 0
+            # 2D 位置: Llama/GPT2 直接用; Qwen3-VL 自动 expand 成 4 轴, 文本三轴相同.
+            prefill_kwargs["position_ids"] = torch.arange(
+                prompt_length, device=device
+            ).unsqueeze(0)
+        with _prof("stage:target_prefill"):
+            prefill_outputs = self.target_m(
+                out_ids,
+                past_key_values=static_cache,
+                cache_position=torch.arange(prompt_length, device=device),
+                attention_mask=prefill_attention_mask,
+                use_cache=True,
+                output_hidden_states=True,
+                **prefill_kwargs,
+            )
+        recovery_logits = prefill_outputs.logits[0, -1]
+        acts_all = select_eagle_acts_from_hidden_states(
+            prefill_outputs.hidden_states, self.eagle_layers, last_token_only=False
+        )
+        # ③ draft prefill + 可选预消费, 与 eager 路径共用.
+        draft_state = self._init_draft_state(
+            out_ids, acts_all, recovery_logits, draft_position_ids
+        )
+
+        cur_len = prompt_length
+        num_new_tokens = 0
+        pending_in_out_ids = False
+        while num_new_tokens < max_new_tokens:
+            last_token = int(out_ids[0, -1].item())
+            if eos_token_id is not None and last_token == eos_token_id:
+                break  # pending 可能已是 EOS, 无需再 forward
+            if pending_in_out_ids:
+                # 稳态轮: pending 视作 draft 已预消费的确定根, 与首轮 preconsume 对齐.
+                draft_state.confirmed_root_token = last_token
+                forwarded_prefix = out_ids[:, :-1]
+                recovery_logits = None
+            else:
+                forwarded_prefix = out_ids
+            with _prof("stage:draft_build_tree"):
+                layout = self._build_tree(forwarded_prefix, draft_state)
+            self.n_tree_nodes += len(layout)
+            leaves = _leaf_indices(layout.parent)
+            confirmed_root = draft_state.confirmed_root_token is not None
+            with _prof("stage:target_verify_commit"):
+                (
+                    append_list,
+                    proposed_draft_tokens,
+                    accepted_features,
+                ) = verifier.verify_commit(
+                    layout,
+                    cur_len,
+                    recovery_logits,
+                    leaves=leaves,
+                    rope_delta=self._rope_delta,
+                    confirmed_root=confirmed_root,
+                    eagle_layers=self.eagle_layers,
+                )
+            if confirmed_root:
+                # 确定根节点不是 draft 提议, 不计入 proposed 统计.
+                proposed_draft_tokens -= 1
+            self.n_proposed_draft_tokens += proposed_draft_tokens
+            append = torch.tensor([append_list], device=device, dtype=torch.long)
+            # verify 写入的树 KV 已被 commit 紧凑成接受段, 写入指针拨到 cur_len+m.
+            cur_len += len(append_list) - 1
             acts_all = torch.cat([acts_all, accepted_features], dim=1)
             draft_state = self._update_draft_after_verify(append, acts_all, draft_state)
             if pending_in_out_ids:

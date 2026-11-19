@@ -330,6 +330,12 @@ def main() -> None:
         default=True,
         help="verify 顺带提交接受路径 KV/feature, 省掉每轮 target replay forward; --no-skip-replay 回退对照",
     )
+    parser.add_argument(
+        "--cuda-graph",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="在 skip_replay 基础上用 StaticCache + verify CUDA graph; --no-cuda-graph 走 DynamicCache",
+    )
     parser.add_argument("--verify-backend", default="triton_tree")
     parser.add_argument(
         "--verify-mode",
@@ -381,6 +387,7 @@ def main() -> None:
         draft_tree_mode=command_line_args.tree_mode,
         preconsume_first_token=command_line_args.preconsume,
         skip_replay=command_line_args.skip_replay,
+        decode_cuda_graph=command_line_args.cuda_graph,
         verify_mode=command_line_args.verify_mode,
         verify_attn_backend=command_line_args.verify_backend,
     )
@@ -412,11 +419,16 @@ def main() -> None:
             samples.append((build_input_ids(tokenizer, prompt_text, device), None))
 
     # 预热: 触发 CUDA kernel 编译/autotune, 不计入统计.
-    warmup_ids, warmup_mm = samples[0]
+    # cuda graph 模式必须用最长样本 + 与计时相同的 max_new_tokens 预热,
+    # 否则正式计时段内会因容量不足重新分配 static cache 并重新捕获 graph.
+    warmup_ids, warmup_mm = max(samples, key=lambda sample: int(sample[0].shape[1]))
+    warmup_new_tokens = (
+        command_line_args.max_new_tokens if command_line_args.cuda_graph else 8
+    )
     with torch.inference_mode():
         generator.generate(
             warmup_ids,
-            max_new_tokens=8,
+            max_new_tokens=warmup_new_tokens,
             eos_token_id=eos,
             multimodal_inputs=warmup_mm,
         )
@@ -576,7 +588,7 @@ def main() -> None:
         f"mode={mode} dtype={command_line_args.dtype} explain={command_line_args.explain}",
         f"target={target_id} draft={draft_id}",
         f"num_prompts={len(summary.results)} max_new_tokens={command_line_args.max_new_tokens}",
-        f"tree: mode={command_line_args.tree_mode} preconsume={command_line_args.preconsume} skip_replay={command_line_args.skip_replay} topk(width)={command_line_args.topk} num_steps(depth)={command_line_args.num_steps} max_tree_nodes={command_line_args.max_tree_nodes}",
+        f"tree: mode={command_line_args.tree_mode} preconsume={command_line_args.preconsume} skip_replay={command_line_args.skip_replay} cuda_graph={command_line_args.cuda_graph} topk(width)={command_line_args.topk} num_steps(depth)={command_line_args.num_steps} max_tree_nodes={command_line_args.max_tree_nodes}",
         f"total_new_tokens={total_new} total_rounds={total_rounds}",
         f"accepted_tokens={total_accepted} proposed_draft_tokens={total_proposed}",
         f"tau(accept_length)={tau:.3f} proposed/round={proposed_per_round:.3f}",

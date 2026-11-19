@@ -34,6 +34,12 @@ class Eagle3SglConfig:
     """draft prefill 预消费 target 已确定的首个 token + 末位 feature; 建树时它作为确定根节点."""
     skip_replay: bool = True
     """verify 顺带提交接受路径的 KV 和 feature, 省掉每轮 target replay; 仅支持 full_model_tree."""
+    decode_cuda_graph: bool = False
+    """target 用 StaticCache, verify+hidden 前向走 CUDA graph(固定 L); 要求 skip_replay."""
+    graph_capture: bool = True
+    """decode_cuda_graph 开启时是否真正捕获 graph; False 则只用 StaticCache eager."""
+    graph_cache_margin: int = 16
+    """StaticCache 容量余量: prompt + max_new_tokens + max_tree_nodes + 1 + margin."""
     eagle_layers: Optional[List[int]] = None
     """作为 draft 条件的 target 多层 hidden 下标;None 时用 default_eagle_layers。"""
     verify_mode: str = "full_model_tree"
@@ -69,6 +75,10 @@ class Eagle3SglConfig:
         if self.verify_mode != "full_model_tree":
             # reference_paths 是对照模式, 没有 commit 实现, 自动回退 replay 路径.
             self.skip_replay = False
+        if self.decode_cuda_graph and not self.skip_replay:
+            raise ValueError("decode_cuda_graph requires skip_replay")
+        if self.graph_cache_margin < 0:
+            raise ValueError("graph_cache_margin must be >= 0")
         if self.verify_attn_backend not in (
             "auto",
             "eager",
