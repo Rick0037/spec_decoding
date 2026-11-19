@@ -38,6 +38,12 @@ verify 默认走 triton_tree kernel, 需要退回 HF sdpa 时加 --verify-backen
 本脚本不开启 profile, 用于干净的 HF 速度对比. 诊断耗时占比使用:
 - time_stages_eagle3_sgl.py: 分阶段墙钟和 verify 内部拆解.
 - profile_eagle3_sgl.py: torch.profiler 算子, 同步, 拷贝和 launch 统计.
+
+
+HF_HUB_OFFLINE=1 .venv/bin/python spec_decoding/eagle3_sgl/example/bench_accept_tpot.py \
+--mode vl --explain --max-new-tokens 130 --topk 8 --num-steps 8 \
+--max-tree-nodes 64 --dtype float16 --cuda-graph
+
 """
 
 from __future__ import annotations
@@ -528,7 +534,9 @@ def main() -> None:
                     forward_kwargs = {}
                     if multimodal_inputs is not None:
                         mm_token_type_ids = multimodal_inputs["mm_token_type_ids"]
-                        pad_length = diverge_prefix.shape[1] - mm_token_type_ids.shape[1]
+                        pad_length = (
+                            diverge_prefix.shape[1] - mm_token_type_ids.shape[1]
+                        )
                         forward_kwargs = {
                             "pixel_values": multimodal_inputs["pixel_values"],
                             "image_grid_thw": multimodal_inputs["image_grid_thw"],
