@@ -434,3 +434,60 @@ HF_HOME=/root/autodl-tmp/hf_cache HF_HUB_OFFLINE=1 PYTHONPATH=. \
 3. 大量 eager launch、临时 tensor、KV/激活拷贝和标量同步。
 
 因此不能只依赖 CUDA Graph。最合理的路径是：先将 correction/bonus 并入下轮 verify 以删除 replay，再用 StaticCache + CUDA Graph 降低固定调度成本。EAGLE2 风格树和 draft 预消费 target 确定 token 主要用于提高 tau，必须与额外 draft/verify 成本一起评估。Triton attention 和树掩码目前都不是主要瓶颈。
+
+## 11. 落地状态与实测(2026-11-20)
+
+### 11.1 已完成优化与收益
+
+VL 实测口径:Qwen3-VL-8B-Instruct + taobao-mnn Eagle3 draft,10 题,max_new_tokens=130,fp16,topk=8 / num_steps=8 / max_tree_nodes=64,eagle2_batch + preconsume。
+
+| 配置 | ms/round | spec TPOT | throughput | speedup | tau |
+|---|---|---|---|---|---|
+| 原 replay 路径(64 token 参考) | 88.11 | 27.06ms | 36.95 tok/s | 1.13x | 3.256 |
+| skip_replay(默认) | 55.87 | 15.14ms | 66.05 tok/s | 2.00x | 3.690 |
+| skip_replay + decode_cuda_graph | 44.79 | 12.14ms | 82.38 tok/s | 2.52x | 3.690 |
+
+所有配置 lossless(all)=True,tau 不变——纯系统层优化,未动接受逻辑。
+
+代码落地:
+
+- **skip_replay(默认开启)**:`full_tree_verify_commit` verify 顺带提交接受路径 KV(按根→叶顺序收行)与多层 feature;`_generate_no_replay` 稳态把上轮 bonus/correction 作为 pending 确定根并入下轮 verify,每轮只剩一次 target forward。对应 6.3 方案 B。
+- **decode_cuda_graph(默认关闭,--cuda-graph)**:`target_graph.py` 的 `StaticGraphCommitVerifier`,StaticCache 固定 buffer + 树 padding 到固定 L=max_tree_nodes+1 + mask padding 到 max_len,verify+hidden 前向整体 CUDA graph 捕获;commit(KV 行紧凑 + 写入指针拨回)在 graph 外 eager。draft 仍为动态 eager。
+- **分支简化**:删除逐节点 eagle2 建树(保留 eagle2_batch/bfs)、删除 verify_mode 开关与 reference_paths 对照(固定树掩码 verify)、verify_attn_backend 收窄为 triton_tree(默认)/eager,开 cuda_graph 时强制 eager。
+
+### 11.2 关键经验与坑
+
+1. transformers 5.20 的 StaticLayer.update 忽略 cache_position,写入位置只由 cumulative_length 决定;每轮 verify 前必须 `fill_` 拨回 cur_len,否则拒绝分支 KV 污染前缀。
+2. **CUDA graph 捕获期间 kernel 只录制不执行**,捕获那次的输出 buffer 内容未定义,捕获后必须 replay 一次才拿本轮真实 logits(曾导致首轮 bonus 错误)。
+3. 树是 BFS 序,接受路径行散布其中,commit 必须按路径顺序 index_select + copy_ 紧凑;零接受时也要 crop 掉整棵临时树。
+4. padding 节点不进 leaves,mask 行只允许看前缀,避免整行 -inf 出 NaN。
+5. graph 要求固定 shape/地址:DynamicCache 逐层 cat 换地址无法捕获,StaticCache 是前提;triton extend kernel 的 metadata 逐轮动态,故 graph 路径用 SDPA + padding mask(对全长 max_len 算 attention,屏蔽列也耗带宽,是已知代价)。
+6. **profiler 的 stage device 表对 graph 路径失真**:graph 内部 kernel 不归属 CPU stage,target_verify_commit 显示 0.44ms/轮只是 eager 部分;真实 verify GPU ≈26.5ms/轮 在 top 算子表(cutlass GEMM 638ms + wmma 210ms + fmha 51ms ≈ 900ms/34 轮)。
+7. bench/profile/time_stages 的 warmup 在 graph 模式下用最长样本 + 完整生成长度,避免计时段内重捕获。
+
+### 11.3 当前每轮预算(graph 路径,time_stages,VL 单题 130 token)
+
+| 阶段 | ms/round | 占比 | 性质 |
+|---|---|---|---|
+| target_verify(graph replay) | 26.9 | 59% | 纯 GPU 计算(SDPA 全长 + 36 层 GEMM) |
+| draft_build_tree | 11.6 | 25% | eager,CPU 侧占半以上(profiler: dev 8.7 / cpu 19.3) |
+| prefill 摊销 | 3.2 | 7% | 一次性 109ms(VL 含图像),输出越长占比越小 |
+| draft_extend | 1.8 | 4% | eager 小前向 |
+| verify_commit | 1.7 | 4% | 36 层×K/V 共 144 个小 kernel,纯 launch 开销 |
+| verify_select | 0.15 | 0.3% | 批量 argmax + 一次 D2H |
+| unmeasured/python | 0.3 | 0.7% | graph 已把 CPU 分发压没 |
+
+target_replay=0。每轮合计 ≈45ms,与 bench 44.79 一致。
+
+### 11.4 后续瓶颈与优化项
+
+| 优先级 | 优化项 | 目标耗时 | 思路 | 风险 |
+|---|---|---|---|---|
+| P0 | draft 建树 graph 化 | 11.6ms/轮 | midlayer step 捕获成 graph,frontier batch padding 到固定 topk;剪枝挪 GPU 或保留 CPU;与 target 同属 launch-bound | 动态 batch/长度 padding、AR hidden/KV 数值一致 |
+| P1 | 每轮小拷贝治理 | 1-3ms/轮 | torch.tensor(list, device) 的 pageable HtoD(profiler 下 cudaMemcpyAsync 1267 次/CPU 790ms)改持久 pinned buffer;commit 的 144 次 gather 合并 | 收益量级小,需实测确认 |
+| P2 | verify 注意力静态 padding triton kernel | 26.9ms 中注意力部分 | 省掉 SDPA 对屏蔽列的带宽,kernel/metadata 支持固定 max_len 后捕获进 graph | kernel 级改造,工程量大 |
+| P2 | RMSNorm/elementwise 融合、临时 buffer 复用 | 小 kernel | 同 §7 | 数值一致性 |
+| 暂不做 | GEMM 微内核 | — | 26.9ms 主要是带宽受限的权重读取,接近下限 | 投入大、收益有限 |
+| 算法层 | tau 提升(draft 质量/树预算权衡) | 轮数 | 与系统优化正交,需单独 A/B | tau 收益不确定 |
+
+验证基线:合成测试(CPU/GPU × 随机 draft/oracle 全深度接受 × preconsume 开关 × 跨 generate 复用 × EOS)逐位无损;真权重 lossless(all)=True。后续每项优化沿用 §8 标准:先逐位无损,再看 ms/round 与 speedup。
