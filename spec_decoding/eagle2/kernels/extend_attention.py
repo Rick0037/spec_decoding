@@ -66,11 +66,11 @@ def _get_block_sizes_for_extend_attention(head_dim: int):
     return BLOCK_M, BLOCK_DMODEL, BLOCK_N, num_warps
 
 
-# * 树 verify 的 attention kernel. L = 本轮树节点数, P = 前缀长度.
+# * 树 verify 的 attention kernel. tree_len = 本轮树节点数, cache_len = 已缓存前缀长度.
 # * 一个 program 算 BLOCK_M 行 query, key 分两段扫:
-# *   stage 1: 前缀 P 个 KV, 全部可见, 行号从 kv_indices 取;
-# *   stage 2: 本轮 L 个树节点, 只有祖先可见, 查 custom_mask.
-# * 两段共用 acc/deno/e_max 做 online softmax, 不存 [L, P+L] 的注意力矩阵.
+# *   stage 1: 前缀 cache_len 个 KV, 全部可见, 行号从 kv_indices 取;
+# *   stage 2: 本轮 tree_len 个树节点, 只有祖先可见, 查 custom_mask.
+# * 两段共用 online softmax 累加器, 不存 [tree_len, cache_len+tree_len] 的注意力矩阵.
 @triton.jit
 def _fwd_kernel(
     Q_Extend,
@@ -104,181 +104,201 @@ def _fwd_kernel(
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
 ):
-    cur_seq = tl.program_id(0)
-    cur_head = tl.program_id(1)
-    cur_block_m = tl.program_id(2)
-    cur_kv_head = cur_head // kv_group_num
+    batch_idx = tl.program_id(0)
+    q_head_idx = tl.program_id(1)
+    q_block_idx = tl.program_id(2)
+    kv_head_idx = q_head_idx // kv_group_num
 
-    cur_seq_extend_start_idx = tl.load(qo_indptr + cur_seq)
-    cur_seq_len_extend = tl.load(qo_indptr + cur_seq + 1) - cur_seq_extend_start_idx
-    cur_seq_kv_start_idx = tl.load(kv_indptr + cur_seq)
-    cur_seq_len_prefix = tl.load(kv_indptr + cur_seq + 1) - cur_seq_kv_start_idx
-    cur_seq_len = cur_seq_len_prefix + cur_seq_len_extend
+    # * indptr 存每条序列在扁平张量里的分界; batch=1 时 qo=[0,tree_len], kv=[0,cache_len]
+    #! 全部都在第一维度 + 相关得索引就可以找到对应得数值
+    extend_start_row = tl.load(qo_indptr + batch_idx)  # * 本序列 query 的起始行, batch=1 恒为 0
+    extend_len = tl.load(qo_indptr + batch_idx + 1) - extend_start_row
+    prefix_start_row = tl.load(kv_indptr + batch_idx)
+    prefix_len = tl.load(kv_indptr + batch_idx + 1) - prefix_start_row
+    total_kv_len = prefix_len + extend_len
+    mask_segment_start = tl.load(mask_indptr + batch_idx)
 
-    cur_seq_mask_start_idx = tl.load(mask_indptr + cur_seq)
+    #---
+    head_dim_offsets = tl.arange(0, BLOCK_DMODEL)
+    q_block_offsets = q_block_idx * BLOCK_M + tl.arange(0, BLOCK_M)
+    # * [BLOCK_M] bool: 本 block 哪些 query 行真实存在, 末尾不满一个 block 时掩掉多余行
+    
+    q_mask = q_block_offsets < extend_len
+    d_mask = head_dim_offsets < head_dim
 
-    offs_d = tl.arange(0, BLOCK_DMODEL)
-    offs_m = tl.arange(0, BLOCK_M)
-    mask_m = (cur_block_m * BLOCK_M + offs_m) < cur_seq_len_extend
-
-    mask_d = offs_d < head_dim
-
-    offs_q = (
-        (cur_seq_extend_start_idx + cur_block_m * BLOCK_M + offs_m[:, None])
+    
+    # * q_block_offsets [BLOCK_M] -> [:,None] [BLOCK_M,1], 广播成 [BLOCK_M, BLOCK_DMODEL] 地址
+    query_offsets = (
+        (extend_start_row + q_block_offsets[:, None])
         * stride_qbs
-        + cur_head * stride_qh
-        + offs_d[None, :]
+        + q_head_idx * stride_qh
+        + head_dim_offsets[None, :]
     )
     q = tl.load(
-        Q_Extend + offs_q, mask=(mask_m[:, None]) & (mask_d[None, :]), other=0.0
+        Q_Extend + query_offsets,
+        mask=(q_mask[:, None]) & (d_mask[None, :]),
+        other=0.0,
     )
 
     # stage 1: compute scores with prefix
-    offs_n = tl.arange(0, BLOCK_N)
+    key_col_offsets = tl.arange(0, BLOCK_N)
 
-    acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
-    deno = tl.zeros([BLOCK_M], dtype=tl.float32)
-    e_max = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
+    output_acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
+    softmax_denominator = tl.zeros([BLOCK_M], dtype=tl.float32)
+    running_max = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
 
-    for start_n in range(0, cur_seq_len_prefix, BLOCK_N):
-        start_n = tl.multiple_of(start_n, BLOCK_N)
-        mask_n = (start_n + offs_n) < cur_seq_len_prefix
+    for key_block_start in range(0, prefix_len, BLOCK_N):
+        key_block_start = tl.multiple_of(key_block_start, BLOCK_N)
+        key_col_valid = (key_block_start + key_col_offsets) < prefix_len
 
         # 前缀段全可见, 不查 custom_mask
-        final_mask = mask_m[:, None] & mask_n[None, :]
+        tile_allow_mask = q_mask[:, None] & key_col_valid[None, :]
 
-        offs_kv_loc = tl.load(
-            kv_indices + cur_seq_kv_start_idx + start_n + offs_n,
-            mask=mask_n,
+        prefix_kv_rows = tl.load(
+            kv_indices + prefix_start_row + key_block_start + key_col_offsets,
+            mask=key_col_valid,
             other=0,
         )
 
         # load k in transposed way
-        offs_buf_k = (
-            offs_kv_loc[None, :] * stride_buf_kbs
-            + cur_kv_head * stride_buf_kh
-            + offs_d[:, None]
+        buffer_key_offsets = (
+            prefix_kv_rows[None, :] * stride_buf_kbs
+            + kv_head_idx * stride_buf_kh
+            + head_dim_offsets[:, None]
         )
         k = tl.load(
-            K_Buffer + offs_buf_k,
-            mask=(mask_n[None, :]) & (mask_d[:, None]),
+            K_Buffer + buffer_key_offsets,
+            mask=(key_col_valid[None, :]) & (d_mask[:, None]),
             other=0.0,
         )
 
-        qk = tl.dot(q.to(k.dtype), k)
-        qk *= sm_scale
+        score_tile = tl.dot(q.to(k.dtype), k)
+        score_tile *= sm_scale
 
-        qk = tl.where(final_mask, qk, float("-inf"))
+        score_tile = tl.where(tile_allow_mask, score_tile, float("-inf"))
 
-        row_max = tl.max(qk, 1)
-        row_max_fixed = tl.where(row_max == float("-inf"), -1e20, row_max)
-        n_e_max = tl.maximum(row_max_fixed, e_max)
+        tile_row_max = tl.max(score_tile, 1)
+        tile_row_max_finite = tl.where(
+            tile_row_max == float("-inf"), -1e20, tile_row_max
+        )
+        new_running_max = tl.maximum(tile_row_max_finite, running_max)
 
-        re_scale = tl.exp(e_max - n_e_max)
-        p = tl.exp(qk - n_e_max[:, None])
-        deno = deno * re_scale + tl.sum(p, 1)
+        rescale_factor = tl.exp(running_max - new_running_max)
+        prob_tile = tl.exp(score_tile - new_running_max[:, None])
+        softmax_denominator = softmax_denominator * rescale_factor + tl.sum(prob_tile, 1)
 
-        offs_buf_v = (
-            offs_kv_loc[:, None] * stride_buf_vbs
-            + cur_kv_head * stride_buf_vh
-            + offs_d[None, :]
+        buffer_value_offsets = (
+            prefix_kv_rows[:, None] * stride_buf_vbs
+            + kv_head_idx * stride_buf_vh
+            + head_dim_offsets[None, :]
         )
         v = tl.load(
-            V_Buffer + offs_buf_v,
-            mask=mask_n[:, None] & mask_d[None, :],
+            V_Buffer + buffer_value_offsets,
+            mask=key_col_valid[:, None] & d_mask[None, :],
             other=0.0,
         )
-        p = p.to(v.dtype)
-        acc = acc * re_scale[:, None] + tl.dot(p, v)
+        prob_tile = prob_tile.to(v.dtype)
+        output_acc = output_acc * rescale_factor[:, None] + tl.dot(prob_tile, v)
 
-        e_max = n_e_max
+        running_max = new_running_max
 
     # stage 2: compute the triangle part
 
-    for start_n in range(0, cur_seq_len_extend, BLOCK_N):
-        start_n = tl.multiple_of(start_n, BLOCK_N)
-        mask_n = (start_n + offs_n) < cur_seq_len_extend
+    for key_block_start in range(0, extend_len, BLOCK_N):
+        key_block_start = tl.multiple_of(key_block_start, BLOCK_N)
+        key_col_valid = (key_block_start + key_col_offsets) < extend_len
 
-        final_mask = mask_m[:, None] & mask_n[None, :]
-        custom_mask = tl.load(
+        tile_allow_mask = q_mask[:, None] & key_col_valid[None, :]
+        tree_allow_mask = tl.load(
             mask_ptr
-            + cur_seq_mask_start_idx
-            + (cur_block_m * BLOCK_M + offs_m[:, None]) * cur_seq_len
-            + cur_seq_len_prefix
-            + start_n
-            + offs_n[None, :],
-            mask=(mask_m[:, None] & mask_n[None, :]),
+            + mask_segment_start
+            + q_block_offsets[:, None] * total_kv_len
+            + prefix_len
+            + key_block_start
+            + key_col_offsets[None, :],
+            mask=(q_mask[:, None] & key_col_valid[None, :]),
             other=0,
         )
-        final_mask &= custom_mask
+        tile_allow_mask &= tree_allow_mask
 
-        SKIP_TILE = tl.max(tl.max(final_mask.to(tl.int32), axis=1), axis=0) == 0
+        skip_tile = tl.max(tl.max(tile_allow_mask.to(tl.int32), axis=1), axis=0) == 0
 
-        if not SKIP_TILE:
+        if not skip_tile:
             # load k in transposed way
-            offs_k = (
-                (cur_seq_extend_start_idx + start_n + offs_n[None, :]) * stride_kbs
-                + cur_kv_head * stride_kh
-                + offs_d[:, None]
+            extend_key_offsets = (
+                (extend_start_row + key_block_start + key_col_offsets[None, :])
+                * stride_kbs
+                + kv_head_idx * stride_kh
+                + head_dim_offsets[:, None]
             )
             k = tl.load(
-                K_Extend + offs_k,
-                mask=(mask_n[None, :]) & (mask_d[:, None]),
+                K_Extend + extend_key_offsets,
+                mask=(key_col_valid[None, :]) & (d_mask[:, None]),
                 other=0.0,
             )
 
-            qk = tl.dot(q, k, out_dtype=tl.float32)
+            score_tile = tl.dot(q, k, out_dtype=tl.float32)
 
-            qk *= sm_scale
+            score_tile *= sm_scale
 
-            qk = tl.where(final_mask, qk, float("-inf"))
+            score_tile = tl.where(tile_allow_mask, score_tile, float("-inf"))
 
-            row_max = tl.max(qk, 1)
-            row_max_fixed = tl.where(row_max == float("-inf"), -1e20, row_max)
-            n_e_max = tl.maximum(row_max_fixed, e_max)
+            tile_row_max = tl.max(score_tile, 1)
+            tile_row_max_finite = tl.where(
+                tile_row_max == float("-inf"), -1e20, tile_row_max
+            )
+            new_running_max = tl.maximum(tile_row_max_finite, running_max)
 
-            re_scale = tl.exp(e_max - n_e_max)
-            p = tl.exp(qk - n_e_max[:, None])
-            deno = deno * re_scale + tl.sum(p, 1)
+            rescale_factor = tl.exp(running_max - new_running_max)
+            prob_tile = tl.exp(score_tile - new_running_max[:, None])
+            softmax_denominator = (
+                softmax_denominator * rescale_factor + tl.sum(prob_tile, 1)
+            )
 
-            offs_v = (
-                (cur_seq_extend_start_idx + start_n + offs_n[:, None]) * stride_vbs
-                + cur_kv_head * stride_vh
-                + offs_d[None, :]
+            extend_value_offsets = (
+                (extend_start_row + key_block_start + key_col_offsets[:, None])
+                * stride_vbs
+                + kv_head_idx * stride_vh
+                + head_dim_offsets[None, :]
             )
             v = tl.load(
-                V_Extend + offs_v, mask=mask_n[:, None] & mask_d[None, :], other=0.0
+                V_Extend + extend_value_offsets,
+                mask=key_col_valid[:, None] & d_mask[None, :],
+                other=0.0,
             )
-            p = p.to(v.dtype)
-            acc = acc * re_scale[:, None] + tl.dot(p, v)
+            prob_tile = prob_tile.to(v.dtype)
+            output_acc = (
+                output_acc * rescale_factor[:, None] + tl.dot(prob_tile, v)
+            )
 
-            e_max = n_e_max
+            running_max = new_running_max
 
-    offs_o = (
-        (cur_seq_extend_start_idx + cur_block_m * BLOCK_M + offs_m[:, None])
+    output_offsets = (
+        (extend_start_row + q_block_offsets[:, None])
         * stride_obs
-        + cur_head * stride_oh
-        + offs_d[None, :]
+        + q_head_idx * stride_oh
+        + head_dim_offsets[None, :]
     )
     tl.store(
-        O_Extend + offs_o,
-        acc / deno[:, None],
-        mask=mask_m[:, None] & mask_d[None, :],
+        O_Extend + output_offsets,
+        output_acc / softmax_denominator[:, None],
+        mask=q_mask[:, None] & d_mask[None, :],
     )
 
 
+# * 多 batch 走 varlen 打包: 各序列在第 0 维首尾相接, 无 batch 维, 边界查 indptr.
 def extend_attention_fwd(
-    q_extend,        # * [L, num_heads, head_dim]
-    k_extend,        # * [L, num_kv_heads, head_dim]
-    v_extend,        # * [L, num_kv_heads, head_dim]
-    o_extend,        # * [L, num_heads, head_dim], 输出 buffer
-    k_buffer,        # * [P+L, num_kv_heads, head_dim], 前缀+extend 整段 K
-    v_buffer,        # * [P+L, num_kv_heads, head_dim]
-    qo_indptr,       # * [batch+1], query 段偏移, batch=1 时 [0, L]
-    kv_indptr,       # * [batch+1], 前缀 KV 段偏移, batch=1 时 [0, P]
-    kv_indices,      # * [P], 前缀 KV 行号
-    custom_mask,     # * bool 扁平 L*(P+L), 只有树内 L*L 段被读
-    mask_indptr,     # * [batch+1], custom_mask 段偏移, batch=1 时 [0, L*(P+L)]
+    q_extend,        # * [tree_len, num_heads, head_dim]
+    k_extend,        # * [tree_len, num_kv_heads, head_dim]
+    v_extend,        # * [tree_len, num_kv_heads, head_dim]
+    o_extend,        # * [tree_len, num_heads, head_dim], 输出 buffer
+    k_buffer,        # * [cache_len+tree_len, num_kv_heads, head_dim], 前缀+extend 整段 K
+    v_buffer,        # * [cache_len+tree_len, num_kv_heads, head_dim]
+    qo_indptr,       # * [batch+1], query 段偏移, batch=1 时 [0, tree_len]
+    kv_indptr,       # * [batch+1], 前缀 KV 段偏移, batch=1 时 [0, cache_len]
+    kv_indices,      # * [cache_len], 前缀 KV 行号
+    custom_mask,     # * bool 扁平 tree_len*(cache_len+tree_len), 只有树内方阵段被读
+    mask_indptr,     # * [batch+1], custom_mask 段偏移, batch=1 时 [0, tree_len*(cache_len+tree_len)]
     max_len_extend,  # * int, 最长 extend 行数, 决定 grid 第三维
 ):
     """
