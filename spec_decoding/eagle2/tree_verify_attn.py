@@ -12,14 +12,14 @@ from __future__ import annotations
 import types
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import torch
 import torch.nn as nn
 
 from .tree_verify_mask import (
     TreeVerifyLayout,
-    build_tree_cross_attn_bias_with_prefix,
+    build_tree_cross_bool_mask_with_prefix,
 )
 
 _TRITON_SUPPORTED_ATTN = frozenset(
@@ -94,7 +94,6 @@ class TritonTreeVerifyMetadata:
     custom_mask: torch.Tensor
     mask_indptr: torch.Tensor
     max_len_extend: int
-    past_len: int
     extend_len: int
 
 
@@ -104,18 +103,33 @@ def build_triton_tree_verify_metadata(
     *,
     device: torch.device,
 ) -> TritonTreeVerifyMetadata:
-    """Build metadata for one tree-verify extend step.
+    """为一次树 verify 构造 triton extend attention 所需的索引/掩码元数据(batch=1).
 
-    关键约定:kv_indptr / kv_indices 只描述 前缀 KV(长度 past_len),
-    kernel 用 cur_seq_len_prefix = past_len、stage-1 attend 前缀;extend 的 L 个树节点在 K_Extend 里。
-    custom_mask / mask_indptr 行 stride = past_len+L = total_kv。
+    记 L = 树节点数 len(layout), P = past_len 前缀长度, total_kv = P + L.
+    kernel 把 K/V 分成两段处理:
+      - stage-1: 前缀 KV(长 P), 所有树节点都可见, 不查掩码;
+      - stage-2: 本次 extend 的 L 个树节点(在 K_Extend/V_Extend 里), 套树掩码(兄弟分支互不可见).
+
+    返回各字段(shape / 含义):
+      - qo_indptr   [0, L]: query 段偏移, 共 L 个树节点 query;
+      - kv_indptr   [0, P]: 前缀 KV 段偏移, 只含 P 个前缀 token, 不含树节点;
+      - kv_indices  arange(P): 前缀 KV 在 buffer 中的行号(连续 0..P-1);
+      - custom_mask bool 扁平, 长 L*total_kv, True=允许 attend; 由 [L, P+L] cross bias==0 拍平得到,
+                    每行 stride=total_kv(前缀列全 True, 树段按祖先链);
+      - mask_indptr [0, L*total_kv]: custom_mask 的段偏移;
+      - max_len_extend / extend_len = L.
+
+    关键坑: kv_indptr 必须是 [0, P] 而非 [0, P+L]. 若误把树节点也算进前缀,
+    stage-1 会在 skip_prefix 下无掩码地 attend 所有树节点 → 兄弟分支泄漏, verify 结果错乱.
     """
     l_n = len(layout)
     total_kv = int(past_len) + l_n
-    cross = build_tree_cross_attn_bias_with_prefix(
-        layout, past_len, device=device, dtype=torch.float32
-    )
-    custom_mask = (cross == 0).reshape(-1).to(torch.bool)
+    # * 直接建 bool cross 掩码(True=允许), 不经过 float32 bias 再 ==0 转换; 拍平供 kernel 索引.
+    custom_mask = build_tree_cross_bool_mask_with_prefix(
+        layout, past_len, device=device
+    ).reshape(-1)
+    # import pdb;pdb.set_trace()
+    #* custom_mask -> [32, 44]
     qo_indptr = torch.tensor([0, l_n], dtype=torch.int32, device=device)
     # 前缀 KV 长度 = past_len(不含 extend)
     kv_indptr = torch.tensor([0, int(past_len)], dtype=torch.int32, device=device)
@@ -129,7 +143,6 @@ def build_triton_tree_verify_metadata(
         custom_mask=custom_mask,
         mask_indptr=mask_indptr,
         max_len_extend=l_n,
-        past_len=int(past_len),
         extend_len=l_n,
     )
 
@@ -195,11 +208,12 @@ def _triton_tree_attn_forward(
     module: nn.Module,
     hidden_states: torch.Tensor,
     position_embeddings: Any = None,
-    attention_mask: Any = None,
     past_key_values: Any = None,
     cache_position: Any = None,
     **kwargs: Any,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    # * attention_mask 不单独接: triton kernel 用 ctx.custom_mask, HF 传来的 attention_mask
+    # * 由 **kwargs 吸收即可, 函数体不读它.
     from .kernels.extend_attention import extend_attention_fwd
 
     # transformers 5.x 把 attention 的 cache kwarg 从 past_key_value 改名为 past_key_values(复数);
@@ -261,21 +275,21 @@ def _triton_tree_attn_forward(
     o = torch.empty_like(q)
 
     extend_attention_fwd(
-        q,
-        k_extend,
-        v_extend,
-        o,
-        k_all,
-        v_all,
-        ctx.qo_indptr,
-        ctx.kv_indptr,
-        ctx.kv_indices,
-        ctx.custom_mask,
-        False,
-        ctx.mask_indptr,
-        ctx.max_len_extend,
-        sm_scale=head_dim**-0.5,
-        skip_prefix_custom_mask=True,
+        q_extend=q,                 # * [L, num_heads, head_dim], 本次 L 个树节点的 Q
+        k_extend=k_extend,          # * [L, num_kv, head_dim], 本次 extend 的 K(k_all 末 L 行)
+        v_extend=v_extend,          # * [L, num_kv, head_dim], 本次 extend 的 V
+        o_extend=o,                 # * [L, num_heads, head_dim], 输出 buffer
+        k_buffer=k_all,             # * [P+L, num_kv, head_dim], 前缀+extend 整段 K
+        v_buffer=v_all,             # * [P+L, num_kv, head_dim], 前缀+extend 整段 V
+        qo_indptr=ctx.qo_indptr,    # * [0, L], query 段偏移
+        kv_indptr=ctx.kv_indptr,    # * [0, P], 前缀 KV 段偏移(不含树节点)
+        kv_indices=ctx.kv_indices,  # * arange(P), 前缀 KV 行号
+        custom_mask=ctx.custom_mask,  # * bool 扁平 L*(P+L), 树掩码(True=允许)
+        is_causal=False,            # * 不用因果掩码, 树内可见性由 custom_mask 决定
+        mask_indptr=ctx.mask_indptr,  # * [0, L*(P+L)], custom_mask 段偏移
+        max_len_extend=ctx.max_len_extend,  # * L, grid 第三维 ceil(L/BLOCK_M)
+        sm_scale=head_dim**-0.5,    # * 1/sqrt(head_dim)
+        skip_prefix_custom_mask=True,  # * 前缀段全可见, 不查 mask
     )
 
     attn_output = o.reshape(bsz, q_len, num_heads * head_dim)
@@ -289,12 +303,12 @@ def tree_verify_triton_attention_context(
     decoder: nn.Module,
     metadata: TritonTreeVerifyMetadata,
 ):
-    """Patch each decoder self_attn.forward to call extend_attention_fwd."""
-    originals: List[Tuple[nn.Module, Callable[..., Any]]] = []
+    """临时把每层 self_attn.forward 换成 triton extend kernel, 退出时还原."""
     layers = getattr(decoder, "layers", None)
     if layers is None:
         raise TypeError("decoder.layers not found for triton_tree verify")
 
+    originals = []
     for layer in layers:
         attn = layer.self_attn
         if attn.__class__.__name__ not in _TRITON_SUPPORTED_ATTN:
@@ -302,24 +316,13 @@ def tree_verify_triton_attention_context(
                 f"triton_tree verify unsupported attention: {attn.__class__.__name__}"
             )
         attn._llmqrt_triton_meta = metadata
-        if not hasattr(attn, "_llmqrt_orig_forward"):
-            attn._llmqrt_orig_forward = attn.forward
-        originals.append((attn, attn._llmqrt_orig_forward))
-
-        def _wrapped(
-            self: nn.Module,
-            hidden_states: torch.Tensor,
-            *args: Any,
-            **kw: Any,
-        ) -> Any:
-            return _triton_tree_attn_forward(self, hidden_states, *args, **kw)
-
-        attn.forward = types.MethodType(_wrapped, attn)
+        originals.append((attn, attn.forward))
+        # * 直接绑定 _triton_tree_attn_forward(module=attn); HF 全关键字调用, 省去 _wrapped 转发.
+        attn.forward = types.MethodType(_triton_tree_attn_forward, attn)
 
     try:
         yield
     finally:
         for attn, orig in originals:
             attn.forward = orig
-            if hasattr(attn, "_llmqrt_triton_meta"):
-                del attn._llmqrt_triton_meta
+            del attn._llmqrt_triton_meta

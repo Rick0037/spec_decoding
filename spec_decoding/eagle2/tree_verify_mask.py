@@ -150,6 +150,43 @@ def build_tree_sdpa_attn_bias_4d(
     )
 
 
+def _tree_ancestor_matrix(layout: TreeVerifyLayout) -> torch.Tensor:
+    """[L,L] bool: ancestor[i,k]=True 表示 k 在根→i 路径上(含 i 自己).
+
+    CPU 上沿 parent 链构造, O(L*树深) 次纯 Python 操作, 不碰 GPU.
+    float bias 与 bool mask 共用此矩阵, 避免重复遍历.
+    """
+    n = len(layout)
+    ancestor = torch.eye(n, dtype=torch.bool)
+    for i in range(n):
+        k = layout.parent[i]
+        while k >= 0:
+            ancestor[i, k] = True
+            k = layout.parent[k]
+    return ancestor
+
+
+def build_tree_cross_bool_mask_with_prefix(
+    layout: TreeVerifyLayout,
+    past_seq_len: int,
+    *,
+    device: torch.device,
+) -> torch.Tensor:
+    """triton custom_mask 用的 bool cross 掩码 [L, past_seq_len+L](True=允许 attend).
+
+    与 build_tree_cross_attn_bias_with_prefix 同语义(前缀列全允许, 树段按祖先链),
+    但直接建 bool, 不经过 float32 bias 再 ==0 转换. CPU 构造, 单次 HtoD.
+    """
+    n = len(layout)
+    if n == 0:
+        return torch.zeros(0, past_seq_len, dtype=torch.bool, device=device)
+    ancestor = _tree_ancestor_matrix(layout)
+    mask = torch.zeros((n, past_seq_len + n), dtype=torch.bool)
+    mask[:, :past_seq_len] = True
+    mask[:, past_seq_len:] = ancestor
+    return mask.to(device)
+
+
 # 用于tree attention verify
 def build_tree_cross_attn_bias_with_prefix(
     layout: TreeVerifyLayout,
@@ -176,16 +213,14 @@ def build_tree_cross_attn_bias_with_prefix(
         return torch.zeros(0, past_seq_len, device=device, dtype=dtype)
 
     neg = torch.finfo(dtype).min
-    bias = torch.full((n, past_seq_len + n), neg, device=device, dtype=dtype)
-    for i in range(n):
-        for j in range(past_seq_len + n):
-            if j < past_seq_len:
-                bias[i, j] = 0.0
-            else:
-                k = j - past_seq_len
-                if _on_tree_path(layout.parent, k, i):
-                    bias[i, j] = 0.0
-    return bias
+    ancestor = _tree_ancestor_matrix(layout)
+    # * CPU 建整块: 前缀列整块置 0, 树段按祖先矩阵一次写入, 单次 HtoD.
+    # * 旧版在 GPU 上逐元素赋值 O(L*(P+L)) 次 CUDA 写, 长 prompt 下很慢.
+    bias = torch.full((n, past_seq_len + n), neg, dtype=dtype)
+    bias[:, :past_seq_len] = 0.0
+    tree_part = bias[:, past_seq_len:]
+    tree_part[ancestor] = 0.0
+    return bias.to(device)
 
 
 def build_tree_cross_attn_bias_with_prefix_4d(

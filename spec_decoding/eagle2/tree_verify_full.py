@@ -439,10 +439,21 @@ def full_tree_verify_triton(
 
     数值与 full_tree_verify_extend 等价;同样在 cache 上临时 extend 后 crop、root 接受用 recovery_logits。
     """
-    L = len(layout)
+    L = len(layout) 
+    #* [batch_size, seq_len]
     tree_tokens = torch.tensor([layout.token_ids], device=device, dtype=torch.long)
+    """
+    (Pdb) pos
+    tensor([[12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+            13, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 15, 15, 16]],
+        device='cuda:0')
+    (Pdb) pos.shape
+    torch.Size([1, 32])
+    """
     pos = layout_tree_position_ids(layout, past_len).unsqueeze(0).to(device)
+    # import pdb; pdb.set_trace()
     meta = build_triton_tree_verify_metadata(layout, past_len, device=device)
+    # 
     decoder = _decoder_stack(target_m)
     with tree_verify_triton_attention_context(decoder, meta):
         # 把use_cache=False=>True,使得有着triton extend attn patch的target_m前向verify拿到各个logits
