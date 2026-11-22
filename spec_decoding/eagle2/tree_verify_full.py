@@ -370,8 +370,6 @@ def full_tree_verify_extend(
     past_len: int,
     recovery_logits: torch.Tensor,
     *,
-    parent: List[int],
-    token_ids: List[int],
     leaves: List[int],
     device: torch.device,
 ) -> Tuple[List[int], int, int, List[int]]:
@@ -393,9 +391,9 @@ def full_tree_verify_extend(
     recovery_logits
         target 在前缀末位置预测下一 token的 logits [V]。用于 root 层接受:draft 树
         第一个节点与 recovery_logits 的 argmax 比对(与干净贪心对齐)。
-    parent, token_ids
-        draft 树摊平数组(与 TreeDraftResult 同构):token_ids[i] 为节点 token,
-        parent[i] 为父下标(根为 -1)。供 _select_append_root_child 沿叶路径做 greedy 接受。
+    layout.parent / layout.token_ids
+        draft 树摊平数组:token_ids[i] 为节点 token,parent[i] 为父下标(根为 -1)。
+        内部直接传给 _select_append_root_child 沿叶路径做 greedy 接受,不再单独传参。
     leaves
         所有叶子节点下标列表。对每条根→叶路径比对 target logits,选接受长度最长的一条。
     device
@@ -422,7 +420,7 @@ def full_tree_verify_extend(
         target_m, tree_tokens, past_key_values, position_ids=pos, attention_mask=cross
     )  # [L, V]
     return _select_append_root_child(
-        node_logits, recovery_logits, parent, token_ids, leaves
+        node_logits, recovery_logits, layout.parent, layout.token_ids, leaves
     )
 
 
@@ -434,8 +432,6 @@ def full_tree_verify_triton(
     past_len: int,
     recovery_logits: torch.Tensor,
     *,
-    parent: List[int],
-    token_ids: List[int],
     leaves: List[int],
     device: torch.device,
 ) -> Tuple[List[int], int, int, List[int]]:
@@ -460,5 +456,5 @@ def full_tree_verify_triton(
             attention_mask=torch.ones(1, L, device=device, dtype=torch.long),
         )  # [L, V]
     return _select_append_root_child(
-        node_logits, recovery_logits, parent, token_ids, leaves
+        node_logits, recovery_logits, layout.parent, layout.token_ids, leaves
     )

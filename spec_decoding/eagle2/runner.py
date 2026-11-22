@@ -289,16 +289,19 @@ class Eagle2Generator:
             verify_fn = (
                 full_tree_verify_triton if use_triton else full_tree_verify_extend
             )
+            # * 一次树掩码 verify: 只前向 L 个树节点(复用前缀 KV, 临时 extend 后 crop 还原).
+            # * 记 L = 树节点数 len(layout), P = 前缀长度 past_len, V = target 词表大小.
+            # * 返回 4 元组 append_list
+            # *   append_list      List[int], 本轮要追加的 token = 接受路径 token + 1 个 correction/bonus;
+            # * 这里只用 append_list
             append_list, _, _, _ = verify_fn(
-                self.target_m,
-                layout,
-                past_before,
-                past_len,
-                recovery_logits,
-                parent=draft_res.parent,
-                token_ids=draft_res.token_ids,
-                leaves=leaves,
-                device=device,
+                self.target_m,        # * 完整 target *ForCausalLM(带 lm_head), 一次 forward 出 L 个节点 logits
+                layout,               # * TreeVerifyLayout: 摊平树(token_ids/parent/dfs_order), 决定树掩码与接受选择; position_ids 由 parent 深度+past_len 现算, 不存于 layout
+                past_before,          # * DynamicCache: 前缀 out_ids 的 KV, 每层 [1, n_kv_heads, P, head_dim]
+                past_len,             # * int = P, 已接受前缀长度, 用于构造 [L, P+L] cross 树掩码
+                recovery_logits,      # * [V], target 前缀末位预测下一 token 的 logits, 用于 root 层接受比对
+                leaves=leaves,        # * List[int], 所有叶子下标; 对每条根→叶路径比对, 选接受最长者
+                device=device,        # * torch.device, 计算设备
             )
             append = torch.tensor([append_list], device=device, dtype=torch.long)
             cross_bias = build_tree_cross_attn_bias_with_prefix(
@@ -376,6 +379,7 @@ class Eagle2Generator:
                 break
             last_t = out_ids[:, -1:]
             # 一轮:建树 + verify,得到本轮要采纳的 token 段 append
+            #* out_ids prompt, past last kv cache, last_t last token, next logits, last token feature  
             append, _, _, _ = self.generate_step_payload(
                 out_ids, past, last_t, recovery_logits, root_hidden
             )

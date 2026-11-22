@@ -26,7 +26,8 @@ def test_triton_custom_mask_shape_batch1():
         layout, past_len, device=torch.device("cpu")
     )
     assert meta.max_len_extend == l_n
-    assert meta.kv_indptr.tolist() == [0, past_len + l_n]
+    # kv_indptr 只描述前缀 KV(长 past_len, 不含 extend 的 L 个树节点, 树节点在 K_Extend 里)
+    assert meta.kv_indptr.tolist() == [0, past_len]
     assert meta.mask_indptr.tolist() == [0, l_n * (past_len + l_n)]
 
 
