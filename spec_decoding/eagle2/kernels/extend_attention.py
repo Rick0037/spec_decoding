@@ -105,9 +105,6 @@ def _fwd_kernel(
     BLOCK_DV: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
-    USE_CUSTOM_MASK: tl.constexpr,
-    IS_CAUSAL: tl.constexpr,
-    SKIP_PREFIX_CUSTOM_MASK: tl.constexpr,
 ):
     cur_seq = tl.program_id(0)
     cur_head = tl.program_id(1)
@@ -120,8 +117,7 @@ def _fwd_kernel(
     cur_seq_len_prefix = tl.load(kv_indptr + cur_seq + 1) - cur_seq_kv_start_idx
     cur_seq_len = cur_seq_len_prefix + cur_seq_len_extend
 
-    if USE_CUSTOM_MASK:
-        cur_seq_mask_start_idx = tl.load(mask_indptr + cur_seq)
+    cur_seq_mask_start_idx = tl.load(mask_indptr + cur_seq)
 
     offs_d = tl.arange(0, BLOCK_DMODEL)
     offs_dv = tl.arange(0, BLOCK_DV)
@@ -152,110 +148,75 @@ def _fwd_kernel(
         start_n = tl.multiple_of(start_n, BLOCK_N)
         mask_n = (start_n + offs_n) < cur_seq_len_prefix
 
-        # 前缀默认全可见;SKIP_PREFIX_CUSTOM_MASK=True(树 verify 的用法)时
-        # custom_mask 只描述树内 L×L 段,前缀段不查 mask。
+        # 前缀段全可见, 不查 custom_mask
         final_mask = mask_m[:, None] & mask_n[None, :]
-        if USE_CUSTOM_MASK and not SKIP_PREFIX_CUSTOM_MASK:
-            custom_mask = tl.load(
-                mask_ptr
-                + cur_seq_mask_start_idx
-                + (cur_block_m * BLOCK_M + offs_m[:, None]) * cur_seq_len
-                + start_n
-                + offs_n[None, :],
-                mask=(mask_m[:, None] & mask_n[None, :]),
-                other=0,
-            )
-            final_mask &= custom_mask
 
-        SKIP_TILE = False
-        if USE_CUSTOM_MASK and not SKIP_PREFIX_CUSTOM_MASK:
-            SKIP_TILE = tl.max(tl.max(final_mask.to(tl.int32), axis=1), axis=0) == 0
+        offs_kv_loc = tl.load(
+            kv_indices + cur_seq_kv_start_idx + start_n + offs_n,
+            mask=mask_n,
+            other=0,
+        )
 
-        if not SKIP_TILE:
-            offs_kv_loc = tl.load(
-                kv_indices + cur_seq_kv_start_idx + start_n + offs_n,
-                mask=mask_n,
-                other=0,
-            )
+        # load k in transposed way
+        offs_buf_k = (
+            offs_kv_loc[None, :] * stride_buf_kbs
+            + cur_kv_head * stride_buf_kh
+            + offs_d[:, None]
+        )
+        k = tl.load(
+            K_Buffer + offs_buf_k,
+            mask=(mask_n[None, :]) & (mask_d[:, None]),
+            other=0.0,
+        )
 
-            # load k in transposed way
-            offs_buf_k = (
-                offs_kv_loc[None, :] * stride_buf_kbs
-                + cur_kv_head * stride_buf_kh
-                + offs_d[:, None]
-            )
-            k = tl.load(
-                K_Buffer + offs_buf_k,
-                mask=(mask_n[None, :]) & (mask_d[:, None]),
-                other=0.0,
-            )
+        qk = tl.dot(q.to(k.dtype), k)
+        qk *= sm_scale
 
-            qk = tl.dot(q.to(k.dtype), k)
-            qk *= sm_scale
+        qk = tl.where(final_mask, qk, float("-inf"))
 
-            qk = tl.where(final_mask, qk, float("-inf"))
+        row_max = tl.max(qk, 1)
+        row_max_fixed = tl.where(row_max == float("-inf"), -1e20, row_max)
+        n_e_max = tl.maximum(row_max_fixed, e_max)
 
-            row_max = tl.max(qk, 1)
-            row_max_fixed = tl.where(row_max == float("-inf"), -1e20, row_max)
-            n_e_max = tl.maximum(row_max_fixed, e_max)
+        re_scale = tl.exp(e_max - n_e_max)
+        p = tl.exp(qk - n_e_max[:, None])
+        deno = deno * re_scale + tl.sum(p, 1)
 
-            re_scale = tl.exp(e_max - n_e_max)
-            p = tl.exp(qk - n_e_max[:, None])
-            deno = deno * re_scale + tl.sum(p, 1)
+        offs_buf_v = (
+            offs_kv_loc[:, None] * stride_buf_vbs
+            + cur_kv_head * stride_buf_vh
+            + offs_dv[None, :]
+        )
+        v = tl.load(
+            V_Buffer + offs_buf_v,
+            mask=mask_n[:, None] & mask_dv[None, :],
+            other=0.0,
+        )
+        p = p.to(v.dtype)
+        acc = acc * re_scale[:, None] + tl.dot(p, v)
 
-            offs_buf_v = (
-                offs_kv_loc[:, None] * stride_buf_vbs
-                + cur_kv_head * stride_buf_vh
-                + offs_dv[None, :]
-            )
-            v = tl.load(
-                V_Buffer + offs_buf_v,
-                mask=mask_n[:, None] & mask_dv[None, :],
-                other=0.0,
-            )
-            p = p.to(v.dtype)
-            acc = acc * re_scale[:, None] + tl.dot(p, v)
-
-            e_max = n_e_max
+        e_max = n_e_max
 
     # stage 2: compute the triangle part
 
-    cur_block_m_end = (
-        cur_seq_len_extend
-        if not IS_CAUSAL
-        else tl.minimum(cur_seq_len_extend, (cur_block_m + 1) * BLOCK_M)
-    )
-    for start_n in range(0, cur_block_m_end, BLOCK_N):
+    for start_n in range(0, cur_seq_len_extend, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
-        mask_n = (start_n + offs_n) < cur_block_m_end
+        mask_n = (start_n + offs_n) < cur_seq_len_extend
 
         final_mask = mask_m[:, None] & mask_n[None, :]
-        if USE_CUSTOM_MASK:
-            custom_mask = tl.load(
-                mask_ptr
-                + cur_seq_mask_start_idx
-                + (cur_block_m * BLOCK_M + offs_m[:, None]) * cur_seq_len
-                + cur_seq_len_prefix
-                + start_n
-                + offs_n[None, :],
-                mask=(mask_m[:, None] & mask_n[None, :]),
-                other=0,
-            )
-            custom_mask &= mask_m[:, None] & mask_n[None, :]
-            final_mask &= custom_mask
-        elif IS_CAUSAL:
-            mask_causual = (cur_block_m * BLOCK_M + offs_m[:, None]) >= (
-                start_n + offs_n[None, :]
-            )
-            mask_causual &= mask_m[:, None] & mask_n[None, :]
-            final_mask &= mask_causual
-        else:
-            mask_non_causal = mask_m[:, None] & mask_n[None, :]
-            final_mask &= mask_non_causal
+        custom_mask = tl.load(
+            mask_ptr
+            + cur_seq_mask_start_idx
+            + (cur_block_m * BLOCK_M + offs_m[:, None]) * cur_seq_len
+            + cur_seq_len_prefix
+            + start_n
+            + offs_n[None, :],
+            mask=(mask_m[:, None] & mask_n[None, :]),
+            other=0,
+        )
+        final_mask &= custom_mask
 
-        SKIP_TILE = False
-        if USE_CUSTOM_MASK:
-            SKIP_TILE = tl.max(tl.max(final_mask.to(tl.int32), axis=1), axis=0) == 0
+        SKIP_TILE = tl.max(tl.max(final_mask.to(tl.int32), axis=1), axis=0) == 0
 
         if not SKIP_TILE:
             # load k in transposed way
@@ -321,35 +282,24 @@ def extend_attention_fwd(
     kv_indptr,
     kv_indices,
     custom_mask,
-    is_causal,
     mask_indptr,
     max_len_extend,
-    sm_scale=None,
-    skip_prefix_custom_mask=True,
 ):
     """
     q_extend, k_extend, v_extend, o_extend: contiguous tensors
 
     k_buffer, v_buffer: (prefix + extend) tensors in mem_manager
     """
-    Lq, Lk, Lv = (
-        q_extend.shape[-1],
-        k_extend.shape[-1],
-        v_extend.shape[-1],
-    )
+    Lq, Lv = q_extend.shape[-1], v_extend.shape[-1]
 
     # Get block sizes and configuration
     BLOCK_DMODEL, BLOCK_DV, BLOCK_M, BLOCK_N, num_warps = (
         _get_block_sizes_for_extend_attention(Lq, Lv)
     )
 
-    sm_scale = sm_scale or 1.0 / (Lq**0.5)
+    sm_scale = 1.0 / (Lq**0.5)
     batch_size, head_num = qo_indptr.shape[0] - 1, q_extend.shape[1]
     kv_group_num = q_extend.shape[1] // k_extend.shape[1]
-
-    USE_CUSTOM_MASK = custom_mask is not None
-    # Skip custom mask for prefix part
-    SKIP_PREFIX_CUSTOM_MASK = skip_prefix_custom_mask
 
     grid = (batch_size, head_num, triton.cdiv(max_len_extend, BLOCK_M))
     num_stages = 1
@@ -386,9 +336,6 @@ def extend_attention_fwd(
         BLOCK_N=BLOCK_N,
         Lq=Lq,
         Lv=Lv,
-        USE_CUSTOM_MASK=USE_CUSTOM_MASK,
-        IS_CAUSAL=is_causal,
-        SKIP_PREFIX_CUSTOM_MASK=SKIP_PREFIX_CUSTOM_MASK,
         num_warps=num_warps,
         num_stages=num_stages,
     )

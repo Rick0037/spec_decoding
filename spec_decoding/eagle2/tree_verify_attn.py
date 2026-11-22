@@ -33,6 +33,41 @@ _TRITON_SUPPORTED_ATTN = frozenset(
 )
 
 
+#! 垃圾函数 版本兼容 helper(属性/cache 命名差异.
+def _attn_dims(module: nn.Module) -> Tuple[int, int, int]:
+    """取 (num_heads, num_kv_heads, head_dim). 5.x 头数挪到 config, 旧版在模块上, 两种都兜底."""
+    cfg = getattr(module, "config", None)
+    num_heads = getattr(module, "num_heads", None)
+    if num_heads is None:
+        num_heads = int(cfg.num_attention_heads)
+    num_kv_heads = getattr(module, "num_key_value_heads", None)
+    if num_kv_heads is None:
+        num_kv_heads = int(getattr(cfg, "num_key_value_heads", num_heads))
+    head_dim = getattr(module, "head_dim", None)
+    if head_dim is None:
+        head_dim = module.q_proj.out_features // num_heads
+    return int(num_heads), int(num_kv_heads), int(head_dim)
+
+
+def _resolve_past_cache(past_key_values: Any, kwargs: dict) -> Any:
+    """兼容 cache kwarg 命名: 5.x 用 past_key_values(复数), 旧版 past_key_value(单数)."""
+    if past_key_values is not None:
+        return past_key_values
+    return kwargs.get("past_key_value")
+
+
+def _cache_update_kwargs(position_embeddings: Any, cache_position: Any) -> dict:
+    """构造 cache.update 的 cache_kwargs(sin/cos/cache_position, 按存在性填入)."""
+    cache_kwargs = {}
+    if position_embeddings is not None:
+        cos, sin = position_embeddings
+        cache_kwargs["sin"] = sin
+        cache_kwargs["cos"] = cos
+    if cache_position is not None:
+        cache_kwargs["cache_position"] = cache_position
+    return cache_kwargs
+
+
 def flash_attn_available() -> bool:
     try:
         import flash_attn  # noqa: F401
@@ -203,99 +238,69 @@ def _layer_idx(module: nn.Module) -> int:
     raise AttributeError("self_attn.layer_idx is required for triton tree verify")
 
 
+
+
 # 植入了triton custom mask attn的attn layer
 def _triton_tree_attn_forward(
     module: nn.Module,
-    hidden_states: torch.Tensor,
+    hidden_states: torch.Tensor,  # * [1, L, hidden_size]: 本轮 L 个树节点的激活, 前缀已在 KV cache
     position_embeddings: Any = None,
     past_key_values: Any = None,
     cache_position: Any = None,
     **kwargs: Any,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-    # * attention_mask 不单独接: triton kernel 用 ctx.custom_mask, HF 传来的 attention_mask
-    # * 由 **kwargs 吸收即可, 函数体不读它.
-    from .kernels.extend_attention import extend_attention_fwd
+    """树掩码注意力(batch=1), 替换 HF self_attn.forward.
 
-    # transformers 5.x 把 attention 的 cache kwarg 从 past_key_value 改名为 past_key_values(复数);
-    # 两种命名都兜底,否则前缀 KV 不会传进来 → 树节点只能 attend 自己 → verify 全错.
-    past_key_value = past_key_values
-    if past_key_value is None:
-        past_key_value = kwargs.get("past_key_value")
+    hidden_states [1, L, hidden_size], L=树节点数. 树掩码取自 ctx.custom_mask, 不读 attention_mask.
+    """
+    from .kernels.extend_attention import extend_attention_fwd
 
     ctx: TritonTreeVerifyMetadata = module._llmqrt_triton_meta
     bsz, q_len, _ = hidden_states.shape
     if bsz != 1:
         raise NotImplementedError("triton_tree verify supports batch_size=1 only")
+    num_heads, num_kv_heads, head_dim = _attn_dims(module)
 
-    # transformers 5.x 把头数从 attention 模块挪到了 config,这里两种命名都兼容.
-    mcfg = getattr(module, "config", None)
-    num_heads = getattr(module, "num_heads", None)
-    if num_heads is None:
-        num_heads = int(getattr(mcfg, "num_attention_heads"))
-    num_kv = getattr(module, "num_key_value_heads", None)
-    if num_kv is None:
-        num_kv = int(getattr(mcfg, "num_key_value_heads", num_heads))
-    head_dim = getattr(module, "head_dim", None)
-    if head_dim is None:
-        head_dim = module.q_proj.out_features // num_heads
-    query_states = (
-        module.q_proj(hidden_states)
-        .view(bsz, q_len, num_heads, head_dim)
-        .transpose(1, 2)
-    )
-    key_states = (
-        module.k_proj(hidden_states).view(bsz, q_len, num_kv, head_dim).transpose(1, 2)
-    )
-    value_states = (
-        module.v_proj(hidden_states).view(bsz, q_len, num_kv, head_dim).transpose(1, 2)
-    )
+    # * qkv 投影: [1, L, hidden] -> [1, heads, L, head_dim]
+    query_states = module.q_proj(hidden_states).view(bsz, q_len, num_heads, head_dim).transpose(1, 2)
+    key_states = module.k_proj(hidden_states).view(bsz, q_len, num_kv_heads, head_dim).transpose(1, 2)
+    value_states = module.v_proj(hidden_states).view(bsz, q_len, num_kv_heads, head_dim).transpose(1, 2)
+    query_states, key_states = _apply_rotary(module, query_states, key_states, position_embeddings)
 
-    query_states, key_states = _apply_rotary(
-        module, query_states, key_states, position_embeddings
-    )
-
-    if past_key_value is not None:
-        cache_kwargs = {}
-        if position_embeddings is not None:
-            cos, sin = position_embeddings
-            cache_kwargs = {"sin": sin, "cos": cos}
-        if cache_position is not None:
-            cache_kwargs["cache_position"] = cache_position
-        key_states, value_states = past_key_value.update(
-            key_states, value_states, _layer_idx(module), cache_kwargs
+    # * 写入前缀 KV cache, 返回整段 [1, num_kv_heads, P+L, head_dim]
+    cache = _resolve_past_cache(past_key_values, kwargs)
+    if cache is not None:
+        key_states, value_states = cache.update(
+            key_states, value_states, _layer_idx(module),
+            _cache_update_kwargs(position_embeddings, cache_position),
         )
-
-    # extend_attention_fwd expects Q with all heads, K/V with kv heads (GQA inside kernel).
-    q = query_states.transpose(1, 2).reshape(-1, num_heads, head_dim).contiguous()
-    k_all = key_states.transpose(1, 2).reshape(-1, num_kv, head_dim).contiguous()
-    v_all = value_states.transpose(1, 2).reshape(-1, num_kv, head_dim).contiguous()
-    l_ext = ctx.extend_len
-    k_extend = k_all[-l_ext:]
-    v_extend = v_all[-l_ext:]
+    
+    # * 拍平成 kernel 布局: Q 全头, K/V kv 头(GQA 在 kernel 内); 末 L 行是本次 extend
+    q = query_states.transpose(1, 2).reshape(-1, num_heads, head_dim).contiguous()          # * [L, num_heads, head_dim]
+    k_all = key_states.transpose(1, 2).reshape(-1, num_kv_heads, head_dim).contiguous()     # * [P+L, num_kv_heads, head_dim]
+    v_all = value_states.transpose(1, 2).reshape(-1, num_kv_heads, head_dim).contiguous()   # * [P+L, num_kv_heads, head_dim]
+    l_ext = ctx.extend_len   # * L
+    k_extend = k_all[-l_ext:]  # * 取后面 L 行(本轮), [L, num_kv_heads, head_dim]
+    v_extend = v_all[-l_ext:]  # * [L, num_kv_heads, head_dim]
     o = torch.empty_like(q)
 
     extend_attention_fwd(
         q_extend=q,                 # * [L, num_heads, head_dim], 本次 L 个树节点的 Q
-        k_extend=k_extend,          # * [L, num_kv, head_dim], 本次 extend 的 K(k_all 末 L 行)
-        v_extend=v_extend,          # * [L, num_kv, head_dim], 本次 extend 的 V
+        k_extend=k_extend,          # * [L, num_kv_heads, head_dim], 本次 extend 的 K(k_all 末 L 行)
+        v_extend=v_extend,          # * [L, num_kv_heads, head_dim], 本次 extend 的 V
         o_extend=o,                 # * [L, num_heads, head_dim], 输出 buffer
-        k_buffer=k_all,             # * [P+L, num_kv, head_dim], 前缀+extend 整段 K
-        v_buffer=v_all,             # * [P+L, num_kv, head_dim], 前缀+extend 整段 V
+        k_buffer=k_all,             # * [P+L, num_kv_heads, head_dim], 前缀+extend 整段 K
+        v_buffer=v_all,             # * [P+L, num_kv_heads, head_dim], 前缀+extend 整段 V
         qo_indptr=ctx.qo_indptr,    # * [0, L], query 段偏移
         kv_indptr=ctx.kv_indptr,    # * [0, P], 前缀 KV 段偏移(不含树节点)
         kv_indices=ctx.kv_indices,  # * arange(P), 前缀 KV 行号
         custom_mask=ctx.custom_mask,  # * bool 扁平 L*(P+L), 树掩码(True=允许)
-        is_causal=False,            # * 不用因果掩码, 树内可见性由 custom_mask 决定
         mask_indptr=ctx.mask_indptr,  # * [0, L*(P+L)], custom_mask 段偏移
         max_len_extend=ctx.max_len_extend,  # * L, grid 第三维 ceil(L/BLOCK_M)
-        sm_scale=head_dim**-0.5,    # * 1/sqrt(head_dim)
-        skip_prefix_custom_mask=True,  # * 前缀段全可见, 不查 mask
     )
 
-    attn_output = o.reshape(bsz, q_len, num_heads * head_dim)
-    attn_output = module.o_proj(attn_output)
-    # transformers 5.x 的 attention 返回 (attn_output, attn_weights) 两元组(KV cache 已就地更新).
-    return attn_output, None
+    # * o_proj 回 hidden_size; HF attention 约定返回 (attn_output, attn_weights) 两元组.
+    return module.o_proj(o.reshape(bsz, q_len, num_heads * head_dim)), None
 
 
 @contextmanager

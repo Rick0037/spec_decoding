@@ -453,8 +453,9 @@ def full_tree_verify_triton(
     pos = layout_tree_position_ids(layout, past_len).unsqueeze(0).to(device)
     # import pdb; pdb.set_trace()
     meta = build_triton_tree_verify_metadata(layout, past_len, device=device)
-    # 
+    # * 获取到meta info了 
     decoder = _decoder_stack(target_m)
+    #*
     with tree_verify_triton_attention_context(decoder, meta):
         # 把use_cache=False=>True,使得有着triton extend attn patch的target_m前向verify拿到各个logits
         # 之前用use_cache=False的原因: 怕被拒绝tokens kv污染kv cache,所以牺牲性能换取这个干净
