@@ -13,32 +13,30 @@ if _is_cuda:
     CUDA_CAPABILITY = torch.cuda.get_device_capability()
 
 
-def _get_block_sizes_for_extend_attention(Lq: int, Lv: int):
+def _get_block_sizes_for_extend_attention(head_dim: int):
     """
     Get block sizes and configuration for extend attention kernels.
 
     Args:
-        Lq: Query head dimension
-        Lv: Value head dimension
+        head_dim: Q/K/V head dimension
 
     Returns:
-        tuple: (BLOCK_DMODEL, BLOCK_DV, BLOCK_M, BLOCK_N, num_warps)
+        tuple: (BLOCK_DMODEL, BLOCK_M, BLOCK_N, num_warps)
     """
-    BLOCK_DMODEL = triton.next_power_of_2(Lq)
-    BLOCK_DV = triton.next_power_of_2(Lv)
+    BLOCK_DMODEL = triton.next_power_of_2(head_dim)
 
     # Determine BLOCK_M, BLOCK_N, and num_warps based on hardware (CUDA)
     if _is_cuda and CUDA_CAPABILITY[0] == 12:
         # sm120 workstation Blackwell architecture (RTX Pro 6000) has a much smaller shared memory size (100K)
-        if Lq <= 128:
+        if head_dim <= 128:
             BLOCK_M, BLOCK_N = (64, 128)
-        elif Lq <= 256:
+        elif head_dim <= 256:
             BLOCK_M, BLOCK_N = (64, 64)
         else:
             BLOCK_M, BLOCK_N = (32, 32)
     elif _is_cuda and CUDA_CAPABILITY[0] >= 9:
         # Hopper architecture (H100, etc.)
-        if Lq <= 256:
+        if head_dim <= 256:
             BLOCK_M, BLOCK_N = (128, 64)
         else:
             BLOCK_M, BLOCK_N = (32, 64)
@@ -46,26 +44,26 @@ def _get_block_sizes_for_extend_attention(Lq: int, Lv: int):
         # Ampere architecture (A100, etc.)
         # sm86/sm89 has a much smaller shared memory size (100K) than sm80 (160K)
         if CUDA_CAPABILITY[1] == 9 or CUDA_CAPABILITY[1] == 6:
-            if Lq <= 128:
+            if head_dim <= 128:
                 BLOCK_M, BLOCK_N = (64, 128)
-            elif Lq <= 256:
+            elif head_dim <= 256:
                 BLOCK_M, BLOCK_N = (64, 64)
             else:
                 BLOCK_M, BLOCK_N = (32, 32)
         else:
-            if Lq <= 128:
+            if head_dim <= 128:
                 BLOCK_M, BLOCK_N = (128, 128)
-            elif Lq <= 256:
+            elif head_dim <= 256:
                 BLOCK_M, BLOCK_N = (64, 64)
             else:
                 BLOCK_M, BLOCK_N = (32, 64)
     else:
         # Older architectures / CPU fallback sizing
-        BLOCK_M, BLOCK_N = (64, 64) if Lq <= 128 else (32, 32)
+        BLOCK_M, BLOCK_N = (64, 64) if head_dim <= 128 else (32, 32)
 
-    num_warps = 4 if Lq <= 64 else 8
+    num_warps = 4 if head_dim <= 64 else 8
 
-    return BLOCK_DMODEL, BLOCK_DV, BLOCK_M, BLOCK_N, num_warps
+    return BLOCK_DMODEL, BLOCK_M, BLOCK_N, num_warps
 
 
 # Triton kernel:extend(prefill+KV cache)注意力前向主体,支持 custom_mask(树掩码).
@@ -99,10 +97,8 @@ def _fwd_kernel(
     stride_buf_kh,
     stride_buf_vbs,
     stride_buf_vh,
-    Lq: tl.constexpr,
-    Lv: tl.constexpr,
+    head_dim: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
-    BLOCK_DV: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
 ):
@@ -120,12 +116,10 @@ def _fwd_kernel(
     cur_seq_mask_start_idx = tl.load(mask_indptr + cur_seq)
 
     offs_d = tl.arange(0, BLOCK_DMODEL)
-    offs_dv = tl.arange(0, BLOCK_DV)
     offs_m = tl.arange(0, BLOCK_M)
     mask_m = (cur_block_m * BLOCK_M + offs_m) < cur_seq_len_extend
 
-    mask_d = offs_d < Lq
-    mask_dv = offs_dv < Lv
+    mask_d = offs_d < head_dim
 
     offs_q = (
         (cur_seq_extend_start_idx + cur_block_m * BLOCK_M + offs_m[:, None])
@@ -140,7 +134,7 @@ def _fwd_kernel(
     # stage 1: compute scores with prefix
     offs_n = tl.arange(0, BLOCK_N)
 
-    acc = tl.zeros([BLOCK_M, BLOCK_DV], dtype=tl.float32)
+    acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
     deno = tl.zeros([BLOCK_M], dtype=tl.float32)
     e_max = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
 
@@ -185,11 +179,11 @@ def _fwd_kernel(
         offs_buf_v = (
             offs_kv_loc[:, None] * stride_buf_vbs
             + cur_kv_head * stride_buf_vh
-            + offs_dv[None, :]
+            + offs_d[None, :]
         )
         v = tl.load(
             V_Buffer + offs_buf_v,
-            mask=mask_n[:, None] & mask_dv[None, :],
+            mask=mask_n[:, None] & mask_d[None, :],
             other=0.0,
         )
         p = p.to(v.dtype)
@@ -248,10 +242,10 @@ def _fwd_kernel(
             offs_v = (
                 (cur_seq_extend_start_idx + start_n + offs_n[:, None]) * stride_vbs
                 + cur_kv_head * stride_vh
-                + offs_dv[None, :]
+                + offs_d[None, :]
             )
             v = tl.load(
-                V_Extend + offs_v, mask=mask_n[:, None] & mask_dv[None, :], other=0.0
+                V_Extend + offs_v, mask=mask_n[:, None] & mask_d[None, :], other=0.0
             )
             p = p.to(v.dtype)
             acc = acc * re_scale[:, None] + tl.dot(p, v)
@@ -262,42 +256,42 @@ def _fwd_kernel(
         (cur_seq_extend_start_idx + cur_block_m * BLOCK_M + offs_m[:, None])
         * stride_obs
         + cur_head * stride_oh
-        + offs_dv[None, :]
+        + offs_d[None, :]
     )
     tl.store(
         O_Extend + offs_o,
         acc / deno[:, None],
-        mask=mask_m[:, None] & mask_dv[None, :],
+        mask=mask_m[:, None] & mask_d[None, :],
     )
 
 
 def extend_attention_fwd(
-    q_extend,
-    k_extend,
-    v_extend,
-    o_extend,
-    k_buffer,
-    v_buffer,
-    qo_indptr,
-    kv_indptr,
-    kv_indices,
-    custom_mask,
-    mask_indptr,
-    max_len_extend,
+    q_extend,        # * [L, num_heads, head_dim]
+    k_extend,        # * [L, num_kv_heads, head_dim]
+    v_extend,        # * [L, num_kv_heads, head_dim]
+    o_extend,        # * [L, num_heads, head_dim], 输出 buffer
+    k_buffer,        # * [P+L, num_kv_heads, head_dim], 前缀+extend 整段 K
+    v_buffer,        # * [P+L, num_kv_heads, head_dim]
+    qo_indptr,       # * [batch+1], query 段偏移, batch=1 时 [0, L]
+    kv_indptr,       # * [batch+1], 前缀 KV 段偏移, batch=1 时 [0, P]
+    kv_indices,      # * [P], 前缀 KV 行号
+    custom_mask,     # * bool 扁平 L*(P+L), 只有树内 L*L 段被读
+    mask_indptr,     # * [batch+1], custom_mask 段偏移, batch=1 时 [0, L*(P+L)]
+    max_len_extend,  # * int, 最长 extend 行数, 决定 grid 第三维
 ):
     """
     q_extend, k_extend, v_extend, o_extend: contiguous tensors
 
     k_buffer, v_buffer: (prefix + extend) tensors in mem_manager
     """
-    Lq, Lv = q_extend.shape[-1], v_extend.shape[-1]
+    head_dim = q_extend.shape[-1]
 
     # Get block sizes and configuration
-    BLOCK_DMODEL, BLOCK_DV, BLOCK_M, BLOCK_N, num_warps = (
-        _get_block_sizes_for_extend_attention(Lq, Lv)
+    BLOCK_DMODEL, BLOCK_M, BLOCK_N, num_warps = (
+        _get_block_sizes_for_extend_attention(head_dim)
     )
 
-    sm_scale = 1.0 / (Lq**0.5)
+    sm_scale = 1.0 / (head_dim**0.5)
     batch_size, head_num = qo_indptr.shape[0] - 1, q_extend.shape[1]
     kv_group_num = q_extend.shape[1] // k_extend.shape[1]
 
@@ -331,11 +325,9 @@ def extend_attention_fwd(
         v_buffer.stride(0),
         v_buffer.stride(1),
         BLOCK_DMODEL=BLOCK_DMODEL,
-        BLOCK_DV=BLOCK_DV,
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
-        Lq=Lq,
-        Lv=Lv,
+        head_dim=head_dim,
         num_warps=num_warps,
         num_stages=num_stages,
     )
