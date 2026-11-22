@@ -21,7 +21,7 @@ def _get_block_sizes_for_extend_attention(head_dim: int):
         head_dim: Q/K/V head dimension
 
     Returns:
-        tuple: (BLOCK_DMODEL, BLOCK_M, BLOCK_N, num_warps)
+        tuple: (BLOCK_M, BLOCK_DMODEL, BLOCK_N, num_warps)
     """
     BLOCK_DMODEL = triton.next_power_of_2(head_dim)
 
@@ -63,13 +63,14 @@ def _get_block_sizes_for_extend_attention(head_dim: int):
 
     num_warps = 4 if head_dim <= 64 else 8
 
-    return BLOCK_DMODEL, BLOCK_M, BLOCK_N, num_warps
+    return BLOCK_M, BLOCK_DMODEL, BLOCK_N, num_warps
 
 
-# Triton kernel:extend(prefill+KV cache)注意力前向主体,支持 custom_mask(树掩码).
-# 两段结构:stage 1 扫前缀 KV(分页,经 kv_indices gather),stage 2 扫本次 extend
-# 的新 token(连续内存,套 custom_mask)。两段共用同一组 acc/deno/e_max,
-# online softmax 边扫边归并,不物化 [L, past+L] 注意力矩阵。
+# * 树 verify 的 attention kernel. L = 本轮树节点数, P = 前缀长度.
+# * 一个 program 算 BLOCK_M 行 query, key 分两段扫:
+# *   stage 1: 前缀 P 个 KV, 全部可见, 行号从 kv_indices 取;
+# *   stage 2: 本轮 L 个树节点, 只有祖先可见, 查 custom_mask.
+# * 两段共用 acc/deno/e_max 做 online softmax, 不存 [L, P+L] 的注意力矩阵.
 @triton.jit
 def _fwd_kernel(
     Q_Extend,
@@ -98,8 +99,9 @@ def _fwd_kernel(
     stride_buf_vbs,
     stride_buf_vh,
     head_dim: tl.constexpr,
-    BLOCK_DMODEL: tl.constexpr,
+    # * qk = q @ k^T 的 M/K/N 分块: M=query 行, K=head_dim(补齐到 2 的幂), N=key 列
     BLOCK_M: tl.constexpr,
+    BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
 ):
     cur_seq = tl.program_id(0)
@@ -287,13 +289,17 @@ def extend_attention_fwd(
     head_dim = q_extend.shape[-1]
 
     # Get block sizes and configuration
-    BLOCK_DMODEL, BLOCK_M, BLOCK_N, num_warps = (
+    # * BLOCK_DMODEL: head_dim 补齐到 2 的幂; BLOCK_M: 每个 program 算多少行 query;
+    # * BLOCK_N: 内层循环步长, 每次算 [BLOCK_M, BLOCK_N] 的 qk 小块;
+    # * num_warps: 每个 program 的 warp 数, 线程数 = num_warps * 32
+    BLOCK_M, BLOCK_DMODEL, BLOCK_N, num_warps = (
         _get_block_sizes_for_extend_attention(head_dim)
     )
+    #*  BLOCK_M, BLOCK_N = (64, 128), num_warps = 4 
 
     sm_scale = 1.0 / (head_dim**0.5)
     batch_size, head_num = qo_indptr.shape[0] - 1, q_extend.shape[1]
-    kv_group_num = q_extend.shape[1] // k_extend.shape[1]
+    kv_group_num = q_extend.shape[1] // k_extend.shape[1] # GQA, group_q -> k, v
 
     grid = (batch_size, head_num, triton.cdiv(max_len_extend, BLOCK_M))
     num_stages = 1
@@ -324,8 +330,8 @@ def extend_attention_fwd(
         k_buffer.stride(1),
         v_buffer.stride(0),
         v_buffer.stride(1),
-        BLOCK_DMODEL=BLOCK_DMODEL,
         BLOCK_M=BLOCK_M,
+        BLOCK_DMODEL=BLOCK_DMODEL,
         BLOCK_N=BLOCK_N,
         head_dim=head_dim,
         num_warps=num_warps,
