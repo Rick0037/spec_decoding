@@ -19,6 +19,7 @@ import torch.nn as nn
 from .tree_verify_mask import (
     TreeLayout,
     build_tree_cross_attn_bias_with_prefix,
+    build_tree_cross_bool_mask_with_prefix,
 )
 
 _TRITON_SUPPORTED_ATTN = frozenset(
@@ -66,30 +67,39 @@ def build_triton_tree_verify_metadata(
     *,
     device: torch.device,
 ) -> TritonTreeVerifyMetadata:
-    """Build SGLang-compatible metadata for one tree-verify extend step.
+    """为一次树 verify 构造 triton extend attention 所需的索引/掩码元数据(batch=1).
 
-    关键约定:kv_indptr / kv_indices 只描述 前缀 KV(长度 past_len),
-    kernel 用 cur_seq_len_prefix = past_len、stage-1 attend 前缀;extend 的 L 个树节点在 K_Extend 里。
-    (之前误把 past_len+L 当前缀长度 → stage-1 在 skip_prefix 下把所有树节点当前缀无掩码 attend,
-     兄弟分支泄漏 → 逐节点结果错乱。)custom_mask / mask_indptr 行 stride = past_len+L = total_kv。
+    记 L = 树节点数 len(layout), P = past_len 前缀长度, total_kv = P + L.
+    kernel 把 K/V 分成两段处理:
+      - stage-1: 前缀 KV(长 P), 所有树节点都可见, 不查掩码;
+      - stage-2: 本次 extend 的 L 个树节点(在 K_Extend/V_Extend 里), 套树掩码(兄弟分支互不可见).
+
+    返回各字段(shape / 含义):
+      - qo_indptr   [0, L]: query 段偏移, 共 L 个树节点 query;
+      - kv_indptr   [0, P]: 前缀 KV 段偏移, 只含 P 个前缀 token, 不含树节点;
+      - kv_indices  arange(P): 前缀 KV 在 buffer 中的行号(连续 0..P-1);
+      - custom_mask bool 二维 [L, total_kv], True=允许 attend;
+                    前缀列全 True, 树段按祖先链; kernel 用 stride(0) 作行宽;
+      - mask_indptr [0, L*total_kv]: custom_mask 的段偏移;
+      - max_len_extend / extend_len = L.
+
+    关键坑: kv_indptr 必须是 [0, P] 而非 [0, P+L]. 若误把树节点也算进前缀,
+    stage-1 会在 skip_prefix 下无掩码地 attend 所有树节点 → 兄弟分支泄漏, verify 结果错乱.
     """
     l_n = len(layout)
     total_kv = int(past_len) + l_n
-    # TODO by ruixuan build tree attention mask
-    cross = build_tree_cross_attn_bias_with_prefix(
-        layout, past_len, device=device, dtype=torch.float32
+    # * 直接建 bool cross 掩码(True=允许), 保持二维 [tree_len, cache_len+tree_len]
+    custom_mask = build_tree_cross_bool_mask_with_prefix(
+        layout, past_len, device=device
     )
-    # * 直接转为mask, past length kv 的mask
-    custom_mask = (cross == 0).reshape(-1).to(torch.bool)
+    # import pdb;pdb.set_trace()
+    #* custom_mask -> [32, 44]
     qo_indptr = torch.tensor([0, l_n], dtype=torch.int32, device=device)
     # 前缀 KV 长度 = past_len(不含 extend)
     kv_indptr = torch.tensor([0, int(past_len)], dtype=torch.int32, device=device)
     kv_indices = torch.arange(int(past_len), dtype=torch.int32, device=device)
     # mask 行 stride = total_kv(前缀 + extend),与 kernel 的 cur_seq_len 一致
     mask_indptr = torch.tensor([0, l_n * total_kv], dtype=torch.int32, device=device)
-    # import pdb
-
-    # pdb.set_trace()
     return TritonTreeVerifyMetadata(
         qo_indptr=qo_indptr,
         kv_indptr=kv_indptr,
@@ -212,36 +222,33 @@ def _triton_tree_attn_forward(
     # (Pdb) key_states.shape [batch, num_heads, seq_len, head_dim]
     # torch.Size([1, 12, 12, 64])
 
-    # extend_attention_fwd expects Q with all heads, K/V with kv heads (GQA inside kernel).
-    q = query_states.transpose(1, 2).reshape(-1, num_heads, head_dim).contiguous()
-    k_all = key_states.transpose(1, 2).reshape(-1, num_kv, head_dim).contiguous()
-    v_all = value_states.transpose(1, 2).reshape(-1, num_kv, head_dim).contiguous()
-    l_ext = ctx.extend_len
-    k_extend = k_all[-l_ext:]
-    v_extend = v_all[-l_ext:]
+    # * 拍平成 kernel 布局: Q 全头, K/V kv 头(GQA 在 kernel 内); 末 L 行是本次 extend
+    q = query_states.transpose(1, 2).reshape(-1, num_heads, head_dim).contiguous()  # * [L, num_heads, head_dim]
+    k_all = key_states.transpose(1, 2).reshape(-1, num_kv, head_dim).contiguous()  # * [P+L, num_kv_heads, head_dim]
+    v_all = value_states.transpose(1, 2).reshape(-1, num_kv, head_dim).contiguous()  # * [P+L, num_kv_heads, head_dim]
+    l_ext = ctx.extend_len  # * L
+    k_extend = k_all[-l_ext:]  # * 取后面 L 行(本轮), [L, num_kv_heads, head_dim]
+    v_extend = v_all[-l_ext:]  # * [L, num_kv_heads, head_dim]
     o = torch.empty_like(q)
 
     extend_attention_fwd(
-        q,
-        k_extend,
-        v_extend,
-        o,
-        k_all,
-        v_all,
-        ctx.qo_indptr,
-        ctx.kv_indptr,
-        ctx.kv_indices,
-        ctx.custom_mask,
-        False,
-        ctx.mask_indptr,
-        ctx.max_len_extend,
-        sm_scale=head_dim**-0.5,
-        skip_prefix_custom_mask=True,
+        q_extend=q,  # * [L, num_heads, head_dim], 本次 L 个树节点的 Q
+        k_extend=k_extend,  # * [L, num_kv_heads, head_dim], 本次 extend 的 K(k_all 末 L 行)
+        v_extend=v_extend,  # * [L, num_kv_heads, head_dim], 本次 extend 的 V
+        o_extend=o,  # * [L, num_heads, head_dim], 输出 buffer
+        k_buffer=k_all,  # * [P+L, num_kv_heads, head_dim], 前缀+extend 整段 K
+        v_buffer=v_all,  # * [P+L, num_kv_heads, head_dim], 前缀+extend 整段 V
+        qo_indptr=ctx.qo_indptr,  # * [0, L], query 段偏移
+        kv_indptr=ctx.kv_indptr,  # * [0, P], 前缀 KV 段偏移(不含树节点)
+        kv_indices=ctx.kv_indices,  # * arange(P), 前缀 KV 行号
+        custom_mask=ctx.custom_mask,  # * bool [L, P+L], 树掩码(True=允许)
+        mask_indptr=ctx.mask_indptr,  # * [0, L*(P+L)], custom_mask 段偏移
+        max_len_extend=ctx.max_len_extend,  # * L, grid 第三维 ceil(L/BLOCK_M)
     )
 
+    # * o_proj 回 hidden_size; transformers 5.x 的 attention 返回 (attn_output, attn_weights) 两元组(KV cache 已就地更新).
     attn_output = o.reshape(bsz, q_len, num_heads * head_dim)
     attn_output = module.o_proj(attn_output)
-    # transformers 5.x 的 attention 返回 (attn_output, attn_weights) 两元组(KV cache 已就地更新).
     return attn_output, None
 
 

@@ -72,6 +72,43 @@ def layout_tree_position_ids(
     return torch.tensor(depths, dtype=torch.long) + int(past_len) + int(rope_delta)
 
 
+def _tree_ancestor_matrix(layout: TreeLayout) -> torch.Tensor:
+    """[L,L] bool: ancestor[i,k]=True 表示 k 在根→i 路径上(含 i 自己).
+
+    CPU 上沿 parent 链构造, O(L*树深) 次纯 Python 操作, 不碰 GPU.
+    float bias 与 bool mask 共用此矩阵, 避免重复遍历.
+    """
+    n = len(layout)
+    ancestor = torch.eye(n, dtype=torch.bool)
+    for i in range(n):
+        k = layout.parent[i]
+        while k >= 0:
+            ancestor[i, k] = True
+            k = layout.parent[k]
+    return ancestor
+
+
+def build_tree_cross_bool_mask_with_prefix(
+    layout: TreeLayout,
+    past_seq_len: int,
+    *,
+    device: torch.device,
+) -> torch.Tensor:
+    """triton custom_mask 用的 bool cross 掩码 [L, past_seq_len+L](True=允许 attend).
+
+    与 build_tree_cross_attn_bias_with_prefix 同语义(前缀列全允许, 树段按祖先链),
+    但直接建 bool, 不经过 float32 bias 再 ==0 转换. CPU 构造, 单次 HtoD.
+    """
+    n = len(layout)
+    if n == 0:
+        return torch.zeros(0, past_seq_len, dtype=torch.bool, device=device)
+    ancestor = _tree_ancestor_matrix(layout)
+    mask = torch.zeros((n, past_seq_len + n), dtype=torch.bool)
+    mask[:, :past_seq_len] = True
+    mask[:, past_seq_len:] = ancestor
+    return mask.to(device)
+
+
 # 用于tree attention verify,attention_bias即表示attention_mask
 def build_tree_cross_attn_bias_with_prefix(
     layout: TreeLayout,
@@ -111,12 +148,7 @@ def build_tree_cross_attn_bias_with_prefix(
 
     # * ancestor[i, k] = True 表示节点 k 在根->i 的路径上(含 i 自己).
     # 沿 parent 指针向上走, 只有 O(L*树深) 次纯 Python 操作, 不碰 GPU.
-    ancestor = torch.eye(n, dtype=torch.bool)
-    for i in range(n):
-        k = layout.parent[i]
-        while k >= 0:
-            ancestor[i, k] = True
-            k = layout.parent[k]
+    ancestor = _tree_ancestor_matrix(layout)
     # * 如果i 看向 j . 再path上就不mask掉
     tree_part = bias[:, past_seq_len:]
     tree_part[ancestor] = 0.0
