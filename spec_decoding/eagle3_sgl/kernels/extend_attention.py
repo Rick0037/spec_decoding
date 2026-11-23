@@ -225,7 +225,7 @@ def _fwd_kernel(
         # * 列从 prefix_len 起, 前缀那段 kernel 不读
         tree_mask_ptr = (
             mask_ptr
-            + mask_segment_start
+            + mask_segment_start  # `mask_segment_start` 是 已经展平后的元素偏移 ，不是行号：
             + q_offsets[:, None] * mask_row_stride
             + (prefix_len + k_start)  # * 跳过前缀
             + k_offsets[None, :]
