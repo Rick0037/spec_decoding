@@ -64,9 +64,9 @@ def main() -> None:
     parser.add_argument("--max-new-tokens", type=int, default=64)
     command_line_args = parser.parse_args()
 
-    # EAGLE2 官方推荐形态:cumulative 动态树,num_steps=5 / 32 节点
-    # (比 EAGLE1 的 4/24 略大,体现动态剪枝的节点利用率优势)
+    # EAGLE2 官方推荐 4/5/32; 这里放大到 8/8/128, 让 verify 的 L 超过 BLOCK_M=64
     topk, num_steps, max_tree_nodes = 4, 5, 32
+    # topk, num_steps, max_tree_nodes = 8, 8, 128
     tree_expand_mode, verify_mode, verify_attn_backend = (
         "cumulative",
         "full_model_tree",

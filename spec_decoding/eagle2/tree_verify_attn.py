@@ -149,8 +149,8 @@ def build_triton_tree_verify_metadata(
       - qo_indptr   [0, L]: query 段偏移, 共 L 个树节点 query;
       - kv_indptr   [0, P]: 前缀 KV 段偏移, 只含 P 个前缀 token, 不含树节点;
       - kv_indices  arange(P): 前缀 KV 在 buffer 中的行号(连续 0..P-1);
-      - custom_mask bool 扁平, 长 L*total_kv, True=允许 attend; 由 [L, P+L] cross bias==0 拍平得到,
-                    每行 stride=total_kv(前缀列全 True, 树段按祖先链);
+      - custom_mask bool 二维 [L, total_kv], True=允许 attend;
+                    前缀列全 True, 树段按祖先链; kernel 用 stride(0) 作行宽;
       - mask_indptr [0, L*total_kv]: custom_mask 的段偏移;
       - max_len_extend / extend_len = L.
 
@@ -159,10 +159,10 @@ def build_triton_tree_verify_metadata(
     """
     l_n = len(layout)
     total_kv = int(past_len) + l_n
-    # * 直接建 bool cross 掩码(True=允许), 不经过 float32 bias 再 ==0 转换; 拍平供 kernel 索引.
+    # * 直接建 bool cross 掩码(True=允许), 保持二维 [tree_len, cache_len+tree_len]
     custom_mask = build_tree_cross_bool_mask_with_prefix(
         layout, past_len, device=device
-    ).reshape(-1)
+    )
     # import pdb;pdb.set_trace()
     #* custom_mask -> [32, 44]
     qo_indptr = torch.tensor([0, l_n], dtype=torch.int32, device=device)
@@ -182,13 +182,13 @@ def build_triton_tree_verify_metadata(
     )
 
 
-def tree_custom_mask_bool_flat(
+def tree_custom_mask_bool(
     layout: TreeVerifyLayout,
     past_len: int,
     *,
     device: torch.device,
 ) -> torch.Tensor:
-    """Flat bool mask (True = allow), length L * (past_len + L)."""
+    """Bool mask (True = allow), shape [L, past_len + L]."""
     return build_triton_tree_verify_metadata(
         layout, past_len, device=device
     ).custom_mask
@@ -294,7 +294,7 @@ def _triton_tree_attn_forward(
         qo_indptr=ctx.qo_indptr,    # * [0, L], query 段偏移
         kv_indptr=ctx.kv_indptr,    # * [0, P], 前缀 KV 段偏移(不含树节点)
         kv_indices=ctx.kv_indices,  # * arange(P), 前缀 KV 行号
-        custom_mask=ctx.custom_mask,  # * bool 扁平 L*(P+L), 树掩码(True=允许)
+        custom_mask=ctx.custom_mask,  # * bool [L, P+L], 树掩码(True=允许)
         mask_indptr=ctx.mask_indptr,  # * [0, L*(P+L)], custom_mask 段偏移
         max_len_extend=ctx.max_len_extend,  # * L, grid 第三维 ceil(L/BLOCK_M)
     )

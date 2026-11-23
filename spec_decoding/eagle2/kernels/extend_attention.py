@@ -85,6 +85,7 @@ def _fwd_kernel(
     kv_indices,
     mask_ptr,
     mask_indptr,
+    mask_row_stride,  # * custom_mask 的行宽 = cache_len + tree_len
     sm_scale,
     kv_group_num,
     stride_qbs,
@@ -105,6 +106,7 @@ def _fwd_kernel(
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
 ):
+    # * q [batch_size, head, seq_len, head_dim]
     batch_idx = tl.program_id(0)
     q_head_idx = tl.program_id(1)
     # 对应seq_len得维度, 遍历q来处理
@@ -120,7 +122,7 @@ def _fwd_kernel(
     extend_len = tl.load(qo_indptr + batch_idx + 1) - extend_start_row
     prefix_start_row = tl.load(kv_indptr + batch_idx)
     prefix_len = tl.load(kv_indptr + batch_idx + 1) - prefix_start_row
-    total_kv_len = prefix_len + extend_len
+
     mask_segment_start = tl.load(mask_indptr + batch_idx)
 
     # * 2d 情况下, 看到得一些东西
@@ -130,6 +132,7 @@ def _fwd_kernel(
 
     q_ptr = (
         Q_Extend
+        # * batch 和 seq_len 并入一行了
         + (extend_start_row + q_offsets[:, None]) * stride_qbs
         + q_head_idx * stride_qh
         + d_offsets[None, :]
@@ -142,14 +145,15 @@ def _fwd_kernel(
         other=0.0,
     )
 
+    # stage 0: init
+    output_acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
+    running_max = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
+    softmax_sum = tl.zeros([BLOCK_M], dtype=tl.float32)
+
     # stage 1: compute scores with prefix
     k_offsets = tl.arange(0, BLOCK_N)
 
-    output_acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
-    softmax_sum = tl.zeros([BLOCK_M], dtype=tl.float32)
-    running_max = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
-
-    for k_start in range(0, prefix_len, BLOCK_N):
+    for k_start in range(0, prefix_len, BLOCK_N):  # * 针对N 进行分块
         prefix_k_mask = (k_start + k_offsets) < prefix_len
 
         # * [BLOCK_N] int32: 本块前缀 token 在 KV buffer 的物理行号, 不是 K/V 数据
@@ -166,6 +170,7 @@ def _fwd_kernel(
 
         # load k in transposed way
         k_ptr = K_Buffer + (
+            # * prefix_kv_rows = total + batch_size + current_batch_block + k_offsets 总行号
             prefix_kv_rows[:, None] * stride_buf_kbs
             + kv_head_idx * stride_buf_kh
             + d_offsets[None, :]
@@ -184,14 +189,18 @@ def _fwd_kernel(
         score_mask = (q_offsets[:, None] < extend_len) & prefix_k_mask[None, :]
         current_tile_score = tl.where(score_mask, current_tile_score, float("-inf"))
 
+        # * m_t
         tile_row_max = tl.max(current_tile_score, axis=1)
+        # * m = max(m_t-1, m_t)
         new_running_max = tl.maximum(tile_row_max, running_max)
 
         rescale_factor = tl.exp(running_max - new_running_max)
+        # * exp(x - m)
         prob_tile = tl.exp(current_tile_score - new_running_max[:, None])
-        # * 已扫过 key 的未归一化注意力权重之和; 最大值变了, 旧的要缩到新口径
+        # * lt = lt-1 * factor + sum(new_val)
         softmax_sum = softmax_sum * rescale_factor + tl.sum(prob_tile, axis=1)
 
+        # * same as k
         v_ptr = V_Buffer + (
             prefix_kv_rows[:, None] * stride_buf_vbs
             + kv_head_idx * stride_buf_vh
@@ -204,20 +213,21 @@ def _fwd_kernel(
         )
         prob_tile = prob_tile.to(v.dtype)
         output_acc = output_acc * rescale_factor[:, None] + tl.dot(prob_tile, v)
+        # * 最后进行归一化
 
         running_max = new_running_max
 
     # stage 2: compute the triangle part
     for k_start in range(0, extend_len, BLOCK_N):
         tree_k_mask = (k_start + k_offsets) < extend_len
-
-        # * 树掩码: 只有祖先可见; load 的 other=0 已把无效行列置 0
+        # * 获取[BLOCK_M , BLOCK_N]的小块
+        # * custom_mask 是二维 [tree_len, cache_len+tree_len]; 行号 x 行宽 + 列号
+        # * 列从 prefix_len 起, 前缀那段 kernel 不读
         tree_mask_ptr = (
             mask_ptr
             + mask_segment_start
-            + q_offsets[:, None] * total_kv_len
-            + prefix_len
-            + k_start
+            + q_offsets[:, None] * mask_row_stride
+            + (prefix_len + k_start)  # * 跳过前缀
             + k_offsets[None, :]
         )
         score_mask = tl.load(
@@ -226,6 +236,7 @@ def _fwd_kernel(
             other=0,
         )
 
+        # * 对 score_mask 做 tile 内最大值归约；全 0 表示当前 [BLOCK_M, BLOCK_N] 内没有任何可见的 (q, k) 位置，跳过整个 tile
         skip_tile = tl.max(tl.max(score_mask.to(tl.int32), axis=1), axis=0) == 0
 
         if not skip_tile:
@@ -241,7 +252,7 @@ def _fwd_kernel(
                 mask=k_mask,
                 other=0.0,
             )
-
+            # * qk相乘
             current_tile_score = tl.dot(q_val, tl.trans(k_val))
             current_tile_score *= sm_scale
 
@@ -271,7 +282,8 @@ def _fwd_kernel(
 
     o_ptr = (
         O_Extend
-        + (extend_start_row + q_offsets[:, None]) * stride_obs
+        + (extend_start_row + q_offsets[:, None])
+        * stride_obs  # * batch_size 和 seq_len 在一起都在行维度
         + q_head_idx * stride_oh
         + d_offsets[None, :]
     )
@@ -293,7 +305,7 @@ def extend_attention_fwd(
     qo_indptr,  # * [batch+1], query 段偏移, batch=1 时 [0, tree_len]
     kv_indptr,  # * [batch+1], 前缀 KV 段偏移, batch=1 时 [0, cache_len]
     kv_indices,  # * [cache_len], 前缀 KV 行号
-    custom_mask,  # * bool 扁平 tree_len*(cache_len+tree_len), 只有树内方阵段被读
+    custom_mask,  # * bool [tree_len, cache_len+tree_len], 只有树内方阵段被读
     mask_indptr,  # * [batch+1], custom_mask 段偏移, batch=1 时 [0, tree_len*(cache_len+tree_len)]
     max_len_extend,  # * int, 最长 extend 行数, 决定 grid 第三维
 ):
@@ -334,6 +346,7 @@ def extend_attention_fwd(
         kv_indices,
         custom_mask,
         mask_indptr,
+        custom_mask.stride(0),
         sm_scale,
         kv_group_num,
         q_extend.stride(0),

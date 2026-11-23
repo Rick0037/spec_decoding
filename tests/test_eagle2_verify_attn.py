@@ -6,7 +6,7 @@ import torch
 from spec_decoding.eagle2.tree_verify_attn import (
     build_triton_tree_verify_metadata,
     resolve_verify_attn_backend,
-    tree_custom_mask_bool_flat,
+    tree_custom_mask_bool,
 )
 from spec_decoding.eagle2.tree_verify_mask import TreeVerifyLayout
 
@@ -19,9 +19,9 @@ def test_triton_custom_mask_shape_batch1():
     )
     past_len = 5
     l_n = 3
-    flat = tree_custom_mask_bool_flat(layout, past_len, device=torch.device("cpu"))
-    assert flat.dtype == torch.bool
-    assert flat.numel() == l_n * (past_len + l_n)
+    mask = tree_custom_mask_bool(layout, past_len, device=torch.device("cpu"))
+    assert mask.dtype == torch.bool
+    assert mask.shape == (l_n, past_len + l_n)
     meta = build_triton_tree_verify_metadata(
         layout, past_len, device=torch.device("cpu")
     )
