@@ -152,16 +152,31 @@ class Eagle3SglGenerator:
         # * target 的 21 个 token, 对应 draft 的`21-1=20` 条 KV.
         # * 所以传进来的`draft_kv_length=20` 实际表示 draft 已有 KV 数量.
         # 首轮预消费 target 根 token 后, draft_kv_length 会额外增加 1.
-        draft_layout = expand_draft_tree_ar(
-            self.cfg,
-            self.draft_model,
-            draft_state.root_logits,
-            draft_state.root_hidden,
-            draft_state.kv,
-            draft_kv_length=draft_state.prefix_len - 1,
-            device=prefix_ids.device,
-            rope_delta=self._rope_delta,
-        )
+        graph_builder = None
+        if self.cfg.draft_cuda_graph:
+            graph_state = getattr(self, "_sg_state", None)
+            graph_builder = graph_state.get("draft_graph") if graph_state else None
+            if graph_builder is None:
+                raise RuntimeError("draft CUDA Graph 尚未初始化")
+        if graph_builder is not None:
+            draft_layout = graph_builder.build_tree(
+                draft_state.root_logits,
+                draft_state.root_hidden,
+                draft_state.kv,
+                draft_kv_length=draft_state.prefix_len - 1,
+                rope_delta=self._rope_delta,
+            )
+        else:
+            draft_layout = expand_draft_tree_ar(
+                self.cfg,
+                self.draft_model,
+                draft_state.root_logits,
+                draft_state.root_hidden,
+                draft_state.kv,
+                draft_kv_length=draft_state.prefix_len - 1,
+                device=prefix_ids.device,
+                rope_delta=self._rope_delta,
+            )
         if draft_state.confirmed_root_token is None:
             return draft_layout
         # 把已确定的 target 根 token 放在最前面, draft 候选全部作为它的后代.
@@ -661,9 +676,17 @@ class Eagle3SglGenerator:
                 capture_tree_nodes=capture_tree_nodes,
                 enable_graph=bool(self.cfg.graph_capture),
             )
+            draft_graph = None
+            if self.cfg.draft_cuda_graph:
+                from .draft_graph import StaticGraphDraftTree
+
+                draft_graph = StaticGraphDraftTree(
+                    self.draft_model, self.cfg, required_length, device
+                )
             self._sg_state = {
                 "sc": static_cache,
                 "verifier": verifier,
+                "draft_graph": draft_graph,
                 "max_len": required_length,
                 "capture_tree_nodes": capture_tree_nodes,
             }

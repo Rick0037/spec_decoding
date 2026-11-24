@@ -343,6 +343,12 @@ def main() -> None:
         help="在 skip_replay 基础上用 StaticCache + verify CUDA graph; --no-cuda-graph 走 DynamicCache",
     )
     parser.add_argument(
+        "--draft-cuda-graph",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="在 --cuda-graph 基础上把固定形状 eagle2_batch draft tree 也捕获为 CUDA Graph",
+    )
+    parser.add_argument(
         "--verify-backend", default="triton_tree", choices=["triton_tree", "eager"]
     )
     command_line_args = parser.parse_args()
@@ -390,6 +396,7 @@ def main() -> None:
         preconsume_first_token=command_line_args.preconsume,
         skip_replay=command_line_args.skip_replay,
         decode_cuda_graph=command_line_args.cuda_graph,
+        draft_cuda_graph=command_line_args.draft_cuda_graph,
         verify_attn_backend=command_line_args.verify_backend,
     )
     eagle_layers = config.resolve_eagle_layers(num_hidden_layers)
@@ -591,7 +598,7 @@ def main() -> None:
         f"mode={mode} dtype={command_line_args.dtype} explain={command_line_args.explain}",
         f"target={target_id} draft={draft_id}",
         f"num_prompts={len(summary.results)} max_new_tokens={command_line_args.max_new_tokens}",
-        f"tree: mode={command_line_args.tree_mode} preconsume={command_line_args.preconsume} skip_replay={command_line_args.skip_replay} cuda_graph={command_line_args.cuda_graph} topk(width)={command_line_args.topk} num_steps(depth)={command_line_args.num_steps} max_tree_nodes={command_line_args.max_tree_nodes}",
+        f"tree: mode={command_line_args.tree_mode} preconsume={command_line_args.preconsume} skip_replay={command_line_args.skip_replay} cuda_graph={command_line_args.cuda_graph} draft_graph={command_line_args.draft_cuda_graph} topk(width)={command_line_args.topk} num_steps(depth)={command_line_args.num_steps} max_tree_nodes={command_line_args.max_tree_nodes}",
         f"total_new_tokens={total_new} total_rounds={total_rounds}",
         f"accepted_tokens={total_accepted} proposed_draft_tokens={total_proposed}",
         f"tau(accept_length)={tau:.3f} proposed/round={proposed_per_round:.3f}",

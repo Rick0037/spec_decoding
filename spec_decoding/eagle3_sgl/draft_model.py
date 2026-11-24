@@ -263,6 +263,43 @@ class _Eagle3MidLayer(nn.Module):
         mlp = self.down_proj(F.silu(self.gate_proj(h)) * self.up_proj(h))
         return residual + mlp, new_kv
 
+    def step_static(
+        self,
+        embeds: torch.Tensor,
+        hidden: torch.Tensor,
+        key_cache: torch.Tensor,
+        value_cache: torch.Tensor,
+        cache_position: torch.Tensor,
+        rope_position: torch.Tensor,
+        key_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """固定容量 KV 的单步版本；原地写 cache，供 draft tree CUDA Graph 使用。"""
+        b = embeds.shape[0]
+        residual = hidden
+        e = self.input_layernorm(embeds)
+        hn = self.hidden_norm(hidden)
+        x = torch.cat([e, hn], dim=-1)
+        q = self.q_proj(x).view(b, 1, self.n_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(x).view(b, 1, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(x).view(b, 1, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        cos, sin = self._rope_cos_sin(rope_position, x.device, x.dtype)
+        q = _apply_rope(q, cos, sin)
+        k = _apply_rope(k, cos, sin)
+
+        # cache_position 是 GPU tensor，图重放时读取新值，不需要重新 capture。
+        key_cache.index_copy_(2, cache_position, k)
+        value_cache.index_copy_(2, cache_position, v)
+        rep = self.n_heads // self.n_kv_heads
+        kk = key_cache.repeat_interleave(rep, dim=1) if rep > 1 else key_cache
+        vv = value_cache.repeat_interleave(rep, dim=1) if rep > 1 else value_cache
+        o = F.scaled_dot_product_attention(q, kk, vv, attn_mask=key_mask)
+        o = o.transpose(1, 2).contiguous().view(b, 1, self.n_heads * self.head_dim)
+        hidden = residual + self.o_proj(o)
+        residual = hidden
+        h = self.post_attention_layernorm(hidden)
+        mlp = self.down_proj(F.silu(self.gate_proj(h)) * self.up_proj(h))
+        return residual + mlp
+
 
 class Eagle3SglDraftModel(nn.Module):
     """
@@ -415,6 +452,37 @@ class Eagle3SglDraftModel(nn.Module):
         # 末位置 norm + lm_head → 本步对下一 token的分布;h[:, -1] 作为下一步 cond(feature 递归)
         logits = self._lm_logits(self.norm(h)[:, -1, :])
         return logits, h[:, -1, :], new_kv
+
+    @torch.inference_mode()
+    def step_static(
+        self,
+        token_id: torch.LongTensor,
+        cond: torch.Tensor,
+        key_cache: torch.Tensor,
+        value_cache: torch.Tensor,
+        cache_position: torch.Tensor,
+        rope_position: torch.Tensor,
+        key_mask: torch.Tensor,
+    ):
+        """draft tree graph 的单步接口；KV 由调用方的固定 buffer 持有。"""
+        embeds = self.embed(token_id)
+        if cond.dim() == 2:
+            cond = cond.unsqueeze(1)
+        if cond.shape[-1] == self.n_acts * self.hidden:
+            reduced = self.fc(cond.to(embeds.dtype))
+        else:
+            reduced = cond.to(embeds.dtype)
+        h = self.midlayer.step_static(
+            embeds,
+            reduced,
+            key_cache,
+            value_cache,
+            cache_position,
+            rope_position,
+            key_mask,
+        )
+        logits = self._lm_logits(self.norm(h)[:, -1, :])
+        return logits, h[:, -1, :]
 
     @torch.inference_mode()
     def prefill(

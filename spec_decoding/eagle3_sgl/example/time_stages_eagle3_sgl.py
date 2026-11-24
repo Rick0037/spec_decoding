@@ -90,6 +90,12 @@ def main():
         default=False,
         help="StaticCache + verify CUDA graph 路径",
     )
+    p.add_argument(
+        "--draft-cuda-graph",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="在 --cuda-graph 基础上图化固定形状 eagle2_batch draft tree",
+    )
     p.add_argument("--dtype", default="float16")
     p.add_argument("--report-out", default="")
     args = p.parse_args()
@@ -126,6 +132,7 @@ def main():
         max_tree_nodes=args.max_tree_nodes,
         draft_tree_mode=args.tree_mode,
         decode_cuda_graph=args.cuda_graph,
+        draft_cuda_graph=args.draft_cuda_graph,
         verify_attn_backend=args.verify_attn_backend,
     )
     eagle_layers = cfg.resolve_eagle_layers(n_layers)

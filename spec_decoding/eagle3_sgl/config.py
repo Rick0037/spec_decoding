@@ -38,6 +38,8 @@ class Eagle3SglConfig:
     """target 用 StaticCache, verify+hidden 前向走 CUDA graph(固定 L); 要求 skip_replay."""
     graph_capture: bool = True
     """decode_cuda_graph 开启时是否真正捕获 graph; False 则只用 StaticCache eager."""
+    draft_cuda_graph: bool = False
+    """把固定形状的 eagle2_batch draft tree 整体捕获为 CUDA Graph；依赖 decode_cuda_graph。"""
     graph_cache_margin: int = 16
     """StaticCache 容量余量: prompt + max_new_tokens + max_tree_nodes + 1 + margin."""
     eagle_layers: Optional[List[int]] = None
@@ -63,6 +65,12 @@ class Eagle3SglConfig:
             raise ValueError("draft_tree_mode must be eagle2_batch or bfs")
         if self.decode_cuda_graph and not self.skip_replay:
             raise ValueError("decode_cuda_graph requires skip_replay")
+        if self.draft_cuda_graph and not self.decode_cuda_graph:
+            raise ValueError("draft_cuda_graph requires decode_cuda_graph")
+        if self.draft_cuda_graph and not self.graph_capture:
+            raise ValueError("draft_cuda_graph requires graph_capture")
+        if self.draft_cuda_graph and self.draft_tree_mode != "eagle2_batch":
+            raise ValueError("draft_cuda_graph currently requires eagle2_batch")
         if self.graph_cache_margin < 0:
             raise ValueError("graph_cache_margin must be >= 0")
         if self.verify_attn_backend not in ("eager", "triton_tree"):
