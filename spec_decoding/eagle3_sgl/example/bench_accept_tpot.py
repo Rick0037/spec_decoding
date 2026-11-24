@@ -345,8 +345,8 @@ def main() -> None:
     parser.add_argument(
         "--draft-cuda-graph",
         action=argparse.BooleanOptionalAction,
-        default=False,
-        help="在 --cuda-graph 基础上把固定形状 eagle2_batch draft tree 也捕获为 CUDA Graph",
+        default=True,
+        help="在 --cuda-graph 基础上把固定形状 eagle2_batch draft tree 也捕获为 CUDA Graph; --no-draft-cuda-graph 关闭",
     )
     parser.add_argument(
         "--verify-backend", default="triton_tree", choices=["triton_tree", "eager"]
@@ -598,7 +598,7 @@ def main() -> None:
         f"mode={mode} dtype={command_line_args.dtype} explain={command_line_args.explain}",
         f"target={target_id} draft={draft_id}",
         f"num_prompts={len(summary.results)} max_new_tokens={command_line_args.max_new_tokens}",
-        f"tree: mode={command_line_args.tree_mode} preconsume={command_line_args.preconsume} skip_replay={command_line_args.skip_replay} cuda_graph={command_line_args.cuda_graph} draft_graph={command_line_args.draft_cuda_graph} topk(width)={command_line_args.topk} num_steps(depth)={command_line_args.num_steps} max_tree_nodes={command_line_args.max_tree_nodes}",
+        f"tree: mode={command_line_args.tree_mode} preconsume={command_line_args.preconsume} skip_replay={command_line_args.skip_replay} cuda_graph={command_line_args.cuda_graph} draft_graph={config.draft_cuda_graph} topk(width)={command_line_args.topk} num_steps(depth)={command_line_args.num_steps} max_tree_nodes={command_line_args.max_tree_nodes}",
         f"total_new_tokens={total_new} total_rounds={total_rounds}",
         f"accepted_tokens={total_accepted} proposed_draft_tokens={total_proposed}",
         f"tau(accept_length)={tau:.3f} proposed/round={proposed_per_round:.3f}",

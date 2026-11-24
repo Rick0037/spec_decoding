@@ -93,8 +93,8 @@ def main():
     p.add_argument(
         "--draft-cuda-graph",
         action=argparse.BooleanOptionalAction,
-        default=False,
-        help="在 --cuda-graph 基础上图化固定形状 eagle2_batch draft tree",
+        default=True,
+        help="在 --cuda-graph 基础上图化固定形状 eagle2_batch draft tree; --no-draft-cuda-graph 关闭",
     )
     p.add_argument("--dtype", default="float16")
     p.add_argument("--report-out", default="")
