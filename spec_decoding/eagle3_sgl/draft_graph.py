@@ -13,7 +13,7 @@ from .tree_verify_mask import TreeLayout
 class StaticGraphDraftTree:
     """把完整的 eagle2_batch 建树展开捕获为一张 CUDA Graph。"""
 
-    def __init__(self, draft_model, cfg, max_len, device):
+    def __init__(self, draft_model, cfg, max_len, device, svd_head=None):
         self.draft_model = draft_model
         self.cfg = cfg
         self.max_len = int(max_len)
@@ -21,6 +21,16 @@ class StaticGraphDraftTree:
         self.beam = min(int(cfg.topk), int(cfg.max_tree_nodes))
         self.num_steps = int(cfg.num_steps)
         self.total_nodes = self.beam + (self.num_steps - 1) * self.beam * self.beam
+        # 可选 SVD 候选 head: 只替换子节点 lm_head, 根节点仍用完整 root_logits。
+        self.svd_head = svd_head
+        if svd_head is not None:
+            if (
+                getattr(draft_model, "lm_head", None) is None
+                or draft_model.lm_head.weight is not svd_head.weight
+            ):
+                raise ValueError("svd_head 必须基于 draft 独立 lm_head 的同一份权重")
+            if svd_head.num_candidates < self.beam:
+                raise ValueError("svd_head.num_candidates 必须 >= beam")
 
         if cfg.draft_tree_mode != "eagle2_batch":
             raise ValueError("StaticGraphDraftTree only supports eagle2_batch")
@@ -90,7 +100,7 @@ class StaticGraphDraftTree:
         root_value: torch.Tensor,
     ) -> None:
         self.device = root_logits.device
-        # inv_freq 可能仍在 CPU；提前固定到 GPU，避免 RoPE 在捕获时做 H2D。
+        # inv_freq 可能仍在 CPU;提前固定到 GPU，避免 RoPE 在捕获时做 H2D。
         midlayer = getattr(self.draft_model, "midlayer", None)
         inv_freq = getattr(midlayer, "inv_freq", None)
         if inv_freq is not None:
@@ -141,7 +151,7 @@ class StaticGraphDraftTree:
         root_len: int,
         rope_delta: int,
     ) -> None:
-        """每次 warmup/capture/replay 前恢复根输入；buf0 会被上轮重排。"""
+        """每次 warmup/capture/replay 前恢复根输入;buf0 会被上轮重排。"""
         self._root_logits.copy_(root_logits)
         self._root_hidden.copy_(root_hidden)
         self._root_len.fill_(root_len)
@@ -154,7 +164,7 @@ class StaticGraphDraftTree:
             buffers[0][:, :, :root_len].copy_(prefix)
 
     def _run_static(self) -> None:
-        """所有形状和 Python 控制流固定；不得在捕获期间做 D2H 同步。"""
+        """所有形状和 Python 控制流固定;不得在捕获期间做 D2H 同步。"""
         root_ids, root_scores = _topk_target_log_probs(
             self.draft_model, self._root_logits, self.beam
         )
@@ -173,7 +183,7 @@ class StaticGraphDraftTree:
             rope_position = (cache_position + self._rope_delta).reshape(1)
             self._key_mask.copy_(self._key_positions <= cache_position.view(1, 1, 1, 1))
 
-            child_logits, child_hidden = self.draft_model.step_static(
+            child_norm_hidden, child_hidden = self.draft_model.step_static(
                 frontier_tokens,
                 frontier_hidden,
                 self._key_buffers[source_index],
@@ -182,9 +192,7 @@ class StaticGraphDraftTree:
                 rope_position,
                 self._key_mask,
             )
-            child_ids, child_log_probs = _topk_target_log_probs(
-                self.draft_model, child_logits, self.beam
-            )
+            child_ids, child_log_probs = self._child_topk_log_probs(child_norm_hidden)
             candidate_scores = (frontier_scores.unsqueeze(1) + child_log_probs).reshape(
                 -1
             )
@@ -217,6 +225,21 @@ class StaticGraphDraftTree:
             frontier_scores = selected_scores
             frontier_global_indices = candidate_offset + selected_indices
             source_index = destination_index
+
+    def _child_topk_log_probs(self, norm_hidden: torch.Tensor):
+        """子节点 topk;svd_head 是否为 None 在捕获前固定，分支不进图。"""
+        if self.svd_head is None:
+            logits = self.draft_model._lm_logits(norm_hidden)
+            return _topk_target_log_probs(self.draft_model, logits, self.beam)
+        # 两阶段: 低秩召回 Top-C → 原始 W 候选行精确重打分 → Top-beam; q 只在候选内归一化。
+        candidate_ids, exact_logits = self.svd_head.candidates(norm_hidden)
+        scores, positions = torch.topk(exact_logits, self.beam, dim=-1)
+        token_ids = candidate_ids.gather(1, positions)
+        hot_token_id = getattr(self.draft_model, "hot_token_id", None)
+        if hot_token_id is not None:
+            token_ids = hot_token_id[token_ids]
+        log_normalizer = torch.logsumexp(exact_logits.float(), dim=-1, keepdim=True)
+        return token_ids, scores.float() - log_normalizer
 
     def _capture(
         self,

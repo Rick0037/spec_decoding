@@ -130,7 +130,9 @@ class _Eagle3MidLayer(nn.Module):
         inv_freq = self.inv_freq.to(device=device, dtype=torch.float32)
         if positions.dim() == 3:
             # 多模态: positions (3, bs, seq), 图像段是三维网格, 文本段三轴相同.
-            freqs = positions.to(device=device, dtype=torch.float32)[..., None] * inv_freq
+            freqs = (
+                positions.to(device=device, dtype=torch.float32)[..., None] * inv_freq
+            )
             cos = self._mrope_recomposition(freqs.cos())
             sin = self._mrope_recomposition(freqs.sin())
             return cos.to(dtype), sin.to(dtype)
@@ -273,7 +275,7 @@ class _Eagle3MidLayer(nn.Module):
         rope_position: torch.Tensor,
         key_mask: torch.Tensor,
     ) -> torch.Tensor:
-        """固定容量 KV 的单步版本；原地写 cache，供 draft tree CUDA Graph 使用。"""
+        """固定容量 KV 的单步版本;原地写 cache，供 draft tree CUDA Graph 使用。"""
         b = embeds.shape[0]
         residual = hidden
         e = self.input_layernorm(embeds)
@@ -464,7 +466,10 @@ class Eagle3SglDraftModel(nn.Module):
         rope_position: torch.Tensor,
         key_mask: torch.Tensor,
     ):
-        """draft tree graph 的单步接口；KV 由调用方的固定 buffer 持有。"""
+        """draft tree graph 的单步接口;KV 由调用方的固定 buffer 持有。
+
+        返回 (norm_hidden, feature_hidden);lm_head 由调用方施加(Full 或 SVD 候选 head)。
+        """
         embeds = self.embed(token_id)
         if cond.dim() == 2:
             cond = cond.unsqueeze(1)
@@ -481,8 +486,7 @@ class Eagle3SglDraftModel(nn.Module):
             rope_position,
             key_mask,
         )
-        logits = self._lm_logits(self.norm(h)[:, -1, :])
-        return logits, h[:, -1, :]
+        return self.norm(h)[:, -1, :], h[:, -1, :]
 
     @torch.inference_mode()
     def prefill(

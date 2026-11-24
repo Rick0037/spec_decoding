@@ -97,7 +97,7 @@ class DraftTreeGraphTest(unittest.TestCase):
         key_mask = (
             torch.arange(max_len, device=device) <= root_len
         ).view(1, 1, 1, max_len)
-        actual_logits, actual_hidden = draft.step_static(
+        actual_norm_hidden, actual_hidden = draft.step_static(
             tokens,
             hidden,
             static_kv[0],
@@ -107,6 +107,8 @@ class DraftTreeGraphTest(unittest.TestCase):
             key_mask,
         )
         torch.testing.assert_close(actual_hidden, expected_hidden, rtol=2e-2, atol=2e-2)
+        with torch.inference_mode():
+            actual_logits = draft._lm_logits(actual_norm_hidden)
         torch.testing.assert_close(actual_logits, expected_logits, rtol=2e-2, atol=2e-2)
         for static, expected in zip(static_kv, expected_kv):
             torch.testing.assert_close(
@@ -159,6 +161,73 @@ class DraftTreeGraphTest(unittest.TestCase):
             draft_kv_length=root_kv[0].shape[2],
         )
         self.assertIs(graph._graph, captured_graph)
+
+    def test_svd_graph_matches_eager_svd_tree(self):
+        from spec_decoding.eagle3_sgl import tree_draft as tree_draft_module
+        from spec_decoding.eagle3_sgl.draft_graph import StaticGraphDraftTree
+        from spec_decoding.eagle3_sgl.example.svd_draft.svd_head import (
+            CandidateLogits,
+            DraftHeadSwitcher,
+            build_svd_head,
+            candidate_topk_log_probs,
+        )
+
+        device = torch.device("cuda")
+        draft = _tiny_draft(device)
+        config = Eagle3SglConfig(
+            topk=2,
+            num_steps=4,
+            max_tree_nodes=8,
+            draft_tree_mode="eagle2_batch",
+        )
+        head = build_svd_head(draft.lm_head.weight, rank=16, num_candidates=32)
+        graph = StaticGraphDraftTree(
+            draft, config, max_len=32, device=device, svd_head=head
+        )
+
+        original_topk_log_probs = tree_draft_module._topk_target_log_probs
+
+        def adaptive_topk_log_probs(draft_model, logits, topk):
+            if isinstance(logits, CandidateLogits):
+                return candidate_topk_log_probs(draft_model, logits, topk)
+            return original_topk_log_probs(draft_model, logits, topk)
+
+        tree_draft_module._topk_target_log_probs = adaptive_topk_log_probs
+        try:
+            with torch.inference_mode(), DraftHeadSwitcher(
+                draft, head, native_candidates=True
+            ) as switcher:
+                captured_graph = None
+                for prefix_len, seed, rope_delta in ((6, 2, 0), (9, 3, 3)):
+                    # 根输入用 Full prefill: 图内根节点不做 SVD, eager 根也走完整 logits。
+                    switcher.set_mode("full")
+                    root_logits, root_hidden, root_kv = _root(draft, prefix_len, seed)
+                    root_len = root_kv[0].shape[2]
+                    switcher.set_mode("svd")
+                    expected = expand_draft_tree_ar(
+                        config,
+                        draft,
+                        root_logits,
+                        root_hidden,
+                        root_kv,
+                        draft_kv_length=root_len,
+                        device=device,
+                        rope_delta=rope_delta,
+                    )
+                    actual = graph.build_tree(
+                        root_logits,
+                        root_hidden,
+                        root_kv,
+                        draft_kv_length=root_len,
+                        rope_delta=rope_delta,
+                    )
+                    self.assertEqual(actual.token_ids, expected.token_ids)
+                    self.assertEqual(actual.parent, expected.parent)
+                    if captured_graph is not None:
+                        self.assertIs(graph._graph, captured_graph)
+                    captured_graph = graph._graph
+        finally:
+            tree_draft_module._topk_target_log_probs = original_topk_log_probs
 
 
 if __name__ == "__main__":

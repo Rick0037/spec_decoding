@@ -39,7 +39,11 @@ class Eagle3SglConfig:
     graph_capture: bool = True
     """decode_cuda_graph 开启时是否真正捕获 graph; False 则只用 StaticCache eager."""
     draft_cuda_graph: bool = True
-    """把固定形状的 eagle2_batch draft tree 整体捕获为 CUDA Graph；依赖不满足时自动回退 eager。"""
+    """把固定形状的 eagle2_batch draft tree 整体捕获为 CUDA Graph;依赖不满足时自动回退 eager。"""
+    draft_svd_rank: int = 0
+    """SVD 候选 head 的 rank; 0=关闭。>0 时要求 draft_cuda_graph, 只替换子节点 lm_head。"""
+    draft_svd_candidates: int = 128
+    """SVD 低秩召回的候选数 C。"""
     graph_cache_margin: int = 16
     """StaticCache 容量余量: prompt + max_new_tokens + max_tree_nodes + 1 + margin."""
     eagle_layers: Optional[List[int]] = None
@@ -72,6 +76,10 @@ class Eagle3SglConfig:
             or self.draft_tree_mode != "eagle2_batch"
         ):
             self.draft_cuda_graph = False
+        if self.draft_svd_rank > 0 and not self.draft_cuda_graph:
+            raise ValueError(
+                "draft_svd_rank requires draft_cuda_graph (enable decode_cuda_graph)"
+            )
         if self.graph_cache_margin < 0:
             raise ValueError("graph_cache_margin must be >= 0")
         if self.verify_attn_backend not in ("eager", "triton_tree"):

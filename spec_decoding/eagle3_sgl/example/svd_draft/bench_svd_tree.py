@@ -43,6 +43,72 @@ def local_draft_file(filename: str) -> str:
     return hf_hub_download(DEFAULT_REPO, filename, local_files_only=True)
 
 
+def prepare_sample(target, tokenizer, processor, samples, prompts, eagle_layers, device, index):
+    """target prefill 取真实 acts; 带图样本走 get_rope_index 的完整 MRoPE 路径."""
+    if samples is not None:
+        input_ids, multimodal = build_vl_input(
+            processor, prompts[index], samples[index][1], device
+        )
+    else:
+        input_ids, multimodal = build_input_ids(tokenizer, prompts[index], device), None
+
+    rope_delta = 0
+    draft_position_ids = None
+    attention_mask = torch.ones_like(input_ids)
+    with torch.inference_mode():
+        if multimodal is not None:
+            position_ids, rope_deltas = target.model.get_rope_index(
+                input_ids,
+                multimodal["mm_token_type_ids"],
+                image_grid_thw=multimodal.get("image_grid_thw"),
+                attention_mask=attention_mask,
+            )
+            rope_delta = int(rope_deltas.flatten()[0].item())
+            draft_position_ids = position_ids
+            outputs = target(
+                input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                use_cache=True,
+                output_hidden_states=True,
+                **multimodal,
+            )
+        else:
+            outputs = target(
+                input_ids,
+                attention_mask=attention_mask,
+                use_cache=True,
+                output_hidden_states=True,
+            )
+        acts = select_eagle_acts_from_hidden_states(
+            outputs.hidden_states, eagle_layers, last_token_only=False
+        )
+        recovery_logits = outputs.logits[0, -1].clone()
+    del outputs
+    return input_ids, acts, recovery_logits, draft_position_ids, rope_delta
+
+
+def make_draft_root(draft, sample, preconsume: bool, device):
+    """draft prefill(+可选预消费首 token) 得到建树根输入; 返回含前缀长度."""
+    input_ids, acts, recovery_logits, draft_position_ids, rope_delta = sample
+    root_logits, root_hidden, root_kv = draft.prefill(
+        input_ids, acts, position_ids=draft_position_ids
+    )
+    prefix_length = int(input_ids.shape[1])
+    if preconsume:
+        first_token = int(recovery_logits.argmax().item())
+        token_ids = torch.tensor([[first_token]], device=device, dtype=torch.long)
+        root_logits, root_hidden, root_kv = draft.extend_tokens(
+            token_ids,
+            acts[:, -1:, :],
+            root_kv,
+            prefix_length - 1,
+            rope_delta=rope_delta,
+        )
+        prefix_length += 1
+    return root_logits, root_hidden, root_kv, prefix_length
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", default="/root/autodl-tmp/models/Qwen3-VL-8B-Instruct")
@@ -129,69 +195,9 @@ def main() -> None:
     )
     print("[init] " + stats_json(head.stats))
 
-    def prepare_sample(index: int):
-        """target prefill 取真实 acts; 带图样本走 get_rope_index 的完整 MRoPE 路径."""
-        if samples is not None:
-            input_ids, multimodal = build_vl_input(
-                processor, prompts[index], samples[index][1], device
-            )
-        else:
-            input_ids, multimodal = build_input_ids(tokenizer, prompts[index], device), None
-
-        rope_delta = 0
-        draft_position_ids = None
-        attention_mask = torch.ones_like(input_ids)
-        with torch.inference_mode():
-            if multimodal is not None:
-                position_ids, rope_deltas = target.model.get_rope_index(
-                    input_ids,
-                    multimodal["mm_token_type_ids"],
-                    image_grid_thw=multimodal.get("image_grid_thw"),
-                    attention_mask=attention_mask,
-                )
-                rope_delta = int(rope_deltas.flatten()[0].item())
-                draft_position_ids = position_ids
-                outputs = target(
-                    input_ids,
-                    attention_mask=attention_mask,
-                    position_ids=position_ids,
-                    use_cache=True,
-                    output_hidden_states=True,
-                    **multimodal,
-                )
-            else:
-                outputs = target(
-                    input_ids,
-                    attention_mask=attention_mask,
-                    use_cache=True,
-                    output_hidden_states=True,
-                )
-            acts = select_eagle_acts_from_hidden_states(
-                outputs.hidden_states, eagle_layers, last_token_only=False
-            )
-            recovery_logits = outputs.logits[0, -1].clone()
-        del outputs
-        return input_ids, acts, recovery_logits, draft_position_ids, rope_delta
-
     def make_root(mode: str, sample):
-        input_ids, acts, recovery_logits, draft_position_ids, rope_delta = sample
         switcher.set_mode(mode)
-        root_logits, root_hidden, root_kv = draft.prefill(
-            input_ids, acts, position_ids=draft_position_ids
-        )
-        prefix_length = int(input_ids.shape[1])
-        if args.preconsume:
-            first_token = int(recovery_logits.argmax().item())
-            token_ids = torch.tensor([[first_token]], device=device, dtype=torch.long)
-            root_logits, root_hidden, root_kv = draft.extend_tokens(
-                token_ids,
-                acts[:, -1:, :],
-                root_kv,
-                prefix_length - 1,
-                rope_delta=rope_delta,
-            )
-            prefix_length += 1
-        return root_logits, root_hidden, root_kv, prefix_length
+        return make_draft_root(draft, sample, args.preconsume, device)
 
     def build_tree(mode: str, root, rope_delta: int):
         root_logits, root_hidden, root_kv, prefix_length = root
@@ -221,7 +227,9 @@ def main() -> None:
             draft, head, native_candidates=True
         ) as switcher:
             for index in range(len(prompts)):
-                sample = prepare_sample(index)
+                sample = prepare_sample(
+                    target, tokenizer, processor, samples, prompts, eagle_layers, device, index
+                )
                 rope_delta = sample[4]
                 full_root = make_root("full", sample)
                 sparse_root = make_root("svd_sparse", sample)

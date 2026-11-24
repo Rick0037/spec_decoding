@@ -39,7 +39,6 @@ from .tree_verify_full import (
     full_tree_verify_triton,
 )
 
-
 # 只有诊断脚本显式打开环境变量时才打 stage 标签, 正常 bench 保持零插桩.
 _PROFILE = os.environ.get("EAGLE3_SGL_PROFILE", "0") == "1"
 
@@ -87,7 +86,7 @@ class _DraftKvState:
     """保存 draft 的增量状态，供下一轮建树复用。"""
 
     kv: Any
-    """draft 注意力层的 (key, value) 缓存；序列长度为 prefix_len - 1。"""
+    """draft 注意力层的 (key, value) 缓存;序列长度为 prefix_len - 1。"""
     prefix_len: int
     """draft 已消费的 target 位置数. 首轮预消费时比 out_ids 长度大 1, 否则一致."""
     root_logits: torch.Tensor
@@ -228,13 +227,9 @@ class Eagle3SglGenerator:
         # 机器有无 CUDA,不看张量设备,CPU 模型会误入 triton 路径。
         target_on_cuda = next(self.target_m.parameters()).device.type == "cuda"
         use_triton = (
-            backend == "triton_tree"
-            and target_on_cuda
-            and triton_extend_available()
+            backend == "triton_tree" and target_on_cuda and triton_extend_available()
         )
-        verify_fn = (
-            full_tree_verify_triton if use_triton else full_tree_verify_extend
-        )
+        verify_fn = full_tree_verify_triton if use_triton else full_tree_verify_extend
         # * layout 还没有进行剪枝, 非常大
         with _prof("stage:target_verify"):
             append_list, proposed_draft_tokens = verify_fn(
@@ -559,9 +554,7 @@ class Eagle3SglGenerator:
         backend = self.cfg.verify_attn_backend
         target_on_cuda = next(self.target_m.parameters()).device.type == "cuda"
         use_triton = (
-            backend == "triton_tree"
-            and target_on_cuda
-            and triton_extend_available()
+            backend == "triton_tree" and target_on_cuda and triton_extend_available()
         )
         pending_in_out_ids = False
         while num_new_tokens < max_new_tokens:
@@ -680,8 +673,22 @@ class Eagle3SglGenerator:
             if self.cfg.draft_cuda_graph:
                 from .draft_graph import StaticGraphDraftTree
 
+                svd_head = None
+                if self.cfg.draft_svd_rank > 0:
+                    from .example.svd_draft.svd_head import build_svd_head
+
+                    svd_head = build_svd_head(
+                        self.draft_model.lm_head.weight,
+                        rank=self.cfg.draft_svd_rank,
+                        num_candidates=self.cfg.draft_svd_candidates,
+                        cache_dir="/tmp/qwen3vl_svd_cache",
+                    )
                 draft_graph = StaticGraphDraftTree(
-                    self.draft_model, self.cfg, required_length, device
+                    self.draft_model,
+                    self.cfg,
+                    required_length,
+                    device,
+                    svd_head=svd_head,
                 )
             self._sg_state = {
                 "sc": static_cache,
