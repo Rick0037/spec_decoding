@@ -1,0 +1,409 @@
+nohup: ignoring input
+===== mode=text config=eager =====
+[bench] loading target NousResearch/Meta-Llama-3.1-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 1/291 [00:00<03:56,  1.23it/s]Loading weights:  14%|█▎        | 40/291 [00:01<00:05, 47.85it/s]Loading weights:  17%|█▋        | 49/291 [00:01<00:05, 47.06it/s]Loading weights:  20%|█▉        | 58/291 [00:01<00:04, 52.96it/s]Loading weights:  23%|██▎       | 67/291 [00:01<00:03, 58.60it/s]Loading weights:  26%|██▌       | 76/291 [00:01<00:03, 54.33it/s]Loading weights:  29%|██▉       | 85/291 [00:01<00:03, 51.74it/s]Loading weights:  32%|███▏      | 94/291 [00:02<00:04, 49.14it/s]Loading weights:  35%|███▌      | 103/291 [00:02<00:03, 55.43it/s]Loading weights:  38%|███▊      | 112/291 [00:02<00:03, 46.29it/s]Loading weights:  42%|████▏     | 121/291 [00:02<00:03, 52.20it/s]Loading weights:  45%|████▍     | 130/291 [00:02<00:03, 51.02it/s]Loading weights:  48%|████▊     | 139/291 [00:02<00:02, 56.79it/s]Loading weights:  51%|█████     | 148/291 [00:03<00:02, 53.14it/s]Loading weights:  55%|█████▍    | 159/291 [00:03<00:02, 55.33it/s]Loading weights:  58%|█████▊    | 168/291 [00:03<00:01, 62.17it/s]Loading weights:  60%|██████    | 175/291 [00:03<00:01, 61.63it/s]Loading weights:  63%|██████▎   | 184/291 [00:03<00:01, 66.72it/s]Loading weights:  66%|██████▋   | 193/291 [00:03<00:01, 59.79it/s]Loading weights:  69%|██████▉   | 202/291 [00:03<00:01, 53.95it/s]Loading weights:  73%|███████▎  | 211/291 [00:04<00:01, 61.07it/s]Loading weights:  76%|███████▌  | 220/291 [00:04<00:01, 56.07it/s]Loading weights:  79%|███████▊  | 229/291 [00:04<00:01, 52.72it/s]Loading weights:  82%|████████▏ | 238/291 [00:04<00:00, 58.35it/s]Loading weights:  85%|████████▍ | 247/291 [00:04<00:00, 55.08it/s]Loading weights:  88%|████████▊ | 256/291 [00:04<00:00, 60.34it/s]Loading weights:  91%|█████████ | 265/291 [00:05<00:00, 56.30it/s]Loading weights:  94%|█████████▍| 274/291 [00:05<00:00, 51.53it/s]Loading weights:  97%|█████████▋| 283/291 [00:05<00:00, 58.24it/s]Loading weights: 100%|██████████| 291/291 [00:05<00:00, 53.88it/s]
+[bench] target ready: NousResearch/Meta-Llama-3.1-8B-Instruct
+[bench] target=NousResearch/Meta-Llama-3.1-8B-Instruct eagle_layers=[2, 16, 29]
+[bench] warmup done (spec + HF baseline)
+[01] new=131 rounds=33 tau=3.97 proposed/round=3.91 spec_tpot=32.7ms base_tpot=31.0ms lossless=True
+[02] new=132 rounds=20 tau=6.60 proposed/round=5.95 spec_tpot=9.8ms base_tpot=28.1ms lossless=True
+[03] new=134 rounds=27 tau=4.96 proposed/round=4.67 spec_tpot=15.5ms base_tpot=32.1ms lossless=True
+[04] new=135 rounds=28 tau=4.82 proposed/round=4.46 spec_tpot=10.9ms base_tpot=25.5ms lossless=True
+[05] new=135 rounds=22 tau=6.14 proposed/round=5.91 spec_tpot=8.8ms base_tpot=25.9ms lossless=True
+[06] new=130 rounds=24 tau=5.42 proposed/round=5.12 spec_tpot=10.0ms base_tpot=27.3ms lossless=True
+[07] new=132 rounds=31 tau=4.26 proposed/round=3.90 spec_tpot=12.6ms base_tpot=25.6ms lossless=True
+[08] new=130 rounds=26 tau=5.00 proposed/round=4.73 spec_tpot=10.5ms base_tpot=25.7ms lossless=True
+[09] new=130 rounds=26 tau=5.00 proposed/round=4.62 spec_tpot=10.8ms base_tpot=25.8ms lossless=True
+[10] new=133 rounds=29 tau=4.59 proposed/round=4.17 spec_tpot=11.4ms base_tpot=26.0ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=text dtype=float16 explain=True
+target=NousResearch/Meta-Llama-3.1-8B-Instruct draft=yuhuili/EAGLE3-LLaMA3.1-Instruct-8B
+num_prompts=10 max_new_tokens=130
+tree: mode=eagle2_batch preconsume=True skip_replay=True cuda_graph=False draft_graph=False svd_rank=0 topk(width)=8 num_steps(depth)=8 max_tree_nodes=64
+total_new_tokens=1322 total_rounds=266
+accepted_tokens=1322 proposed_draft_tokens=1237
+tau(accept_length)=4.970 proposed/round=4.650
+tree_nodes/round=65.00 (verify 实际算了这么多节点)
+ms/round=65.99
+spec:   TPOT=13.28ms  throughput=75.32 tok/s  wall=17.55s
+baseline: TPOT=27.29ms  throughput=36.65 tok/s  wall=35.48s
+speedup=2.06x  lossless(all)=True
+=============================================================
+===== mode=text config=target_graph =====
+[bench] loading target NousResearch/Meta-Llama-3.1-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 1/291 [00:00<04:46,  1.01it/s]Loading weights:  11%|█▏        | 33/291 [00:01<00:06, 40.61it/s]Loading weights:  17%|█▋        | 50/291 [00:01<00:04, 51.97it/s]Loading weights:  22%|██▏       | 63/291 [00:01<00:04, 54.98it/s]Loading weights:  25%|██▌       | 74/291 [00:01<00:03, 55.65it/s]Loading weights:  29%|██▊       | 83/291 [00:01<00:03, 60.41it/s]Loading weights:  32%|███▏      | 92/291 [00:02<00:03, 55.82it/s]Loading weights:  34%|███▍      | 100/291 [00:02<00:03, 52.33it/s]Loading weights:  37%|███▋      | 107/291 [00:02<00:03, 53.14it/s]Loading weights:  39%|███▉      | 114/291 [00:02<00:03, 46.77it/s]Loading weights:  42%|████▏     | 121/291 [00:02<00:03, 44.88it/s]Loading weights:  45%|████▍     | 130/291 [00:02<00:03, 44.18it/s]Loading weights:  48%|████▊     | 139/291 [00:03<00:03, 44.71it/s]Loading weights:  51%|█████     | 148/291 [00:03<00:03, 44.94it/s]Loading weights:  54%|█████▍    | 157/291 [00:03<00:02, 45.26it/s]Loading weights:  57%|█████▋    | 166/291 [00:03<00:02, 45.40it/s]Loading weights:  60%|██████    | 175/291 [00:03<00:02, 44.57it/s]Loading weights:  63%|██████▎   | 184/291 [00:04<00:02, 45.57it/s]Loading weights:  66%|██████▋   | 193/291 [00:04<00:02, 45.29it/s]Loading weights:  69%|██████▉   | 202/291 [00:04<00:01, 45.29it/s]Loading weights:  73%|███████▎  | 211/291 [00:04<00:01, 51.39it/s]Loading weights:  76%|███████▌  | 220/291 [00:04<00:01, 49.61it/s]Loading weights:  79%|███████▊  | 229/291 [00:04<00:01, 49.34it/s]Loading weights:  82%|████████▏ | 238/291 [00:05<00:01, 47.36it/s]Loading weights:  85%|████████▍ | 247/291 [00:05<00:00, 46.79it/s]Loading weights:  88%|████████▊ | 256/291 [00:05<00:00, 53.40it/s]Loading weights:  91%|█████████ | 265/291 [00:05<00:00, 51.31it/s]Loading weights:  94%|█████████▍| 274/291 [00:05<00:00, 57.26it/s]Loading weights:  97%|█████████▋| 283/291 [00:05<00:00, 54.53it/s]Loading weights: 100%|██████████| 291/291 [00:06<00:00, 48.45it/s]
+[bench] target ready: NousResearch/Meta-Llama-3.1-8B-Instruct
+[bench] target=NousResearch/Meta-Llama-3.1-8B-Instruct eagle_layers=[2, 16, 29]
+[bench] warmup done (spec + HF baseline)
+[01] new=131 rounds=33 tau=3.97 proposed/round=3.88 spec_tpot=10.5ms base_tpot=24.8ms lossless=True
+[02] new=132 rounds=20 tau=6.60 proposed/round=5.95 spec_tpot=6.8ms base_tpot=29.2ms lossless=True
+[03] new=134 rounds=27 tau=4.96 proposed/round=4.67 spec_tpot=8.4ms base_tpot=24.6ms lossless=True
+[04] new=135 rounds=28 tau=4.82 proposed/round=4.46 spec_tpot=8.6ms base_tpot=25.9ms lossless=True
+[05] new=135 rounds=22 tau=6.14 proposed/round=5.91 spec_tpot=7.3ms base_tpot=24.9ms lossless=True
+[06] new=130 rounds=24 tau=5.42 proposed/round=5.12 spec_tpot=7.6ms base_tpot=24.7ms lossless=True
+[07] new=132 rounds=31 tau=4.26 proposed/round=3.90 spec_tpot=9.7ms base_tpot=25.6ms lossless=True
+[08] new=130 rounds=26 tau=5.00 proposed/round=4.73 spec_tpot=8.3ms base_tpot=24.7ms lossless=True
+[09] new=130 rounds=26 tau=5.00 proposed/round=4.62 spec_tpot=8.2ms base_tpot=24.3ms lossless=True
+[10] new=133 rounds=29 tau=4.59 proposed/round=4.17 spec_tpot=8.9ms base_tpot=24.6ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=text dtype=float16 explain=True
+target=NousResearch/Meta-Llama-3.1-8B-Instruct draft=yuhuili/EAGLE3-LLaMA3.1-Instruct-8B
+num_prompts=10 max_new_tokens=130
+tree: mode=eagle2_batch preconsume=True skip_replay=True cuda_graph=True draft_graph=False svd_rank=0 topk(width)=8 num_steps(depth)=8 max_tree_nodes=64
+total_new_tokens=1322 total_rounds=266
+accepted_tokens=1322 proposed_draft_tokens=1236
+tau(accept_length)=4.970 proposed/round=4.647
+tree_nodes/round=65.00 (verify 实际算了这么多节点)
+ms/round=41.85
+spec:   TPOT=8.42ms  throughput=118.76 tok/s  wall=11.13s
+baseline: TPOT=25.35ms  throughput=39.45 tok/s  wall=32.96s
+speedup=3.01x  lossless(all)=True
+=============================================================
+===== mode=text config=full =====
+[bench] loading target NousResearch/Meta-Llama-3.1-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 1/291 [00:00<04:19,  1.12it/s]Loading weights:  16%|█▌        | 46/291 [00:00<00:03, 62.83it/s]Loading weights:  25%|██▌       | 73/291 [00:01<00:03, 64.42it/s]Loading weights:  31%|███▏      | 91/291 [00:01<00:03, 58.31it/s]Loading weights:  36%|███▌      | 104/291 [00:01<00:03, 58.59it/s]Loading weights:  40%|███▉      | 115/291 [00:02<00:03, 58.60it/s]Loading weights:  43%|████▎     | 124/291 [00:02<00:02, 61.49it/s]Loading weights:  46%|████▌     | 133/291 [00:02<00:02, 57.83it/s]Loading weights:  48%|████▊     | 141/291 [00:02<00:02, 60.61it/s]Loading weights:  51%|█████     | 149/291 [00:02<00:02, 54.47it/s]Loading weights:  54%|█████▍    | 157/291 [00:02<00:02, 59.15it/s]Loading weights:  57%|█████▋    | 166/291 [00:03<00:02, 54.99it/s]Loading weights:  60%|██████    | 175/291 [00:03<00:01, 60.06it/s]Loading weights:  63%|██████▎   | 184/291 [00:03<00:01, 56.65it/s]Loading weights:  66%|██████▋   | 193/291 [00:03<00:01, 61.58it/s]Loading weights:  69%|██████▉   | 202/291 [00:03<00:01, 57.96it/s]Loading weights:  73%|███████▎  | 211/291 [00:03<00:01, 61.91it/s]Loading weights:  76%|███████▌  | 220/291 [00:03<00:01, 56.24it/s]Loading weights:  79%|███████▊  | 229/291 [00:04<00:00, 62.88it/s]Loading weights:  82%|████████▏ | 238/291 [00:04<00:00, 57.00it/s]Loading weights:  85%|████████▍ | 247/291 [00:04<00:00, 62.29it/s]Loading weights:  88%|████████▊ | 256/291 [00:04<00:00, 58.08it/s]Loading weights:  91%|█████████ | 265/291 [00:04<00:00, 62.27it/s]Loading weights:  94%|█████████▍| 274/291 [00:04<00:00, 57.55it/s]Loading weights:  97%|█████████▋| 283/291 [00:04<00:00, 63.21it/s]Loading weights: 100%|██████████| 291/291 [00:04<00:00, 58.21it/s]
+[bench] target ready: NousResearch/Meta-Llama-3.1-8B-Instruct
+[bench] target=NousResearch/Meta-Llama-3.1-8B-Instruct eagle_layers=[2, 16, 29]
+[bench] warmup done (spec + HF baseline)
+[01] new=131 rounds=33 tau=3.97 proposed/round=3.88 spec_tpot=9.3ms base_tpot=29.4ms lossless=True
+[02] new=132 rounds=20 tau=6.60 proposed/round=5.95 spec_tpot=5.9ms base_tpot=27.5ms lossless=True
+[03] new=133 rounds=28 tau=4.75 proposed/round=4.61 spec_tpot=8.1ms base_tpot=28.9ms lossless=True
+[04] new=135 rounds=28 tau=4.82 proposed/round=4.54 spec_tpot=7.7ms base_tpot=25.6ms lossless=True
+[05] new=135 rounds=22 tau=6.14 proposed/round=5.91 spec_tpot=6.2ms base_tpot=30.2ms lossless=True
+[06] new=130 rounds=24 tau=5.42 proposed/round=5.12 spec_tpot=7.0ms base_tpot=27.3ms lossless=True
+[07] new=132 rounds=31 tau=4.26 proposed/round=3.90 spec_tpot=8.5ms base_tpot=23.7ms lossless=True
+[08] new=130 rounds=26 tau=5.00 proposed/round=4.73 spec_tpot=7.3ms base_tpot=23.7ms lossless=True
+[09] new=130 rounds=26 tau=5.00 proposed/round=4.62 spec_tpot=7.4ms base_tpot=23.9ms lossless=True
+[10] new=133 rounds=29 tau=4.59 proposed/round=4.17 spec_tpot=7.9ms base_tpot=24.0ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=text dtype=float16 explain=True
+target=NousResearch/Meta-Llama-3.1-8B-Instruct draft=yuhuili/EAGLE3-LLaMA3.1-Instruct-8B
+num_prompts=10 max_new_tokens=130
+tree: mode=eagle2_batch preconsume=True skip_replay=True cuda_graph=True draft_graph=True svd_rank=0 topk(width)=8 num_steps(depth)=8 max_tree_nodes=64
+total_new_tokens=1321 total_rounds=267
+accepted_tokens=1321 proposed_draft_tokens=1241
+tau(accept_length)=4.948 proposed/round=4.648
+tree_nodes/round=65.00 (verify 实际算了这么多节点)
+ms/round=37.19
+spec:   TPOT=7.52ms  throughput=133.05 tok/s  wall=9.93s
+baseline: TPOT=26.42ms  throughput=37.85 tok/s  wall=34.34s
+speedup=3.51x  lossless(all)=True
+=============================================================
+===== mode=text config=svd_r128 =====
+[bench] loading target NousResearch/Meta-Llama-3.1-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 1/291 [00:00<04:21,  1.11it/s]Loading weights:  11%|█▏        | 33/291 [00:01<00:05, 43.81it/s]Loading weights:  17%|█▋        | 50/291 [00:01<00:04, 54.87it/s]Loading weights:  22%|██▏       | 63/291 [00:01<00:03, 57.54it/s]Loading weights:  25%|██▌       | 74/291 [00:01<00:03, 58.02it/s]Loading weights:  29%|██▊       | 83/291 [00:01<00:03, 61.90it/s]Loading weights:  32%|███▏      | 92/291 [00:01<00:03, 57.11it/s]Loading weights:  34%|███▍      | 100/291 [00:02<00:03, 51.57it/s]Loading weights:  37%|███▋      | 107/291 [00:02<00:03, 47.54it/s]Loading weights:  39%|███▉      | 113/291 [00:02<00:03, 47.88it/s]Loading weights:  42%|████▏     | 121/291 [00:02<00:03, 45.74it/s]Loading weights:  45%|████▍     | 130/291 [00:02<00:02, 54.18it/s]Loading weights:  48%|████▊     | 139/291 [00:02<00:02, 51.31it/s]Loading weights:  51%|█████     | 148/291 [00:03<00:02, 49.08it/s]Loading weights:  54%|█████▍    | 157/291 [00:03<00:02, 55.97it/s]Loading weights:  57%|█████▋    | 166/291 [00:03<00:02, 45.92it/s]Loading weights:  60%|██████    | 175/291 [00:03<00:02, 45.78it/s]Loading weights:  63%|██████▎   | 184/291 [00:03<00:02, 52.78it/s]Loading weights:  66%|██████▋   | 193/291 [00:03<00:01, 58.50it/s]Loading weights:  69%|██████▉   | 202/291 [00:04<00:01, 53.89it/s]Loading weights:  73%|███████▎  | 211/291 [00:04<00:01, 53.03it/s]Loading weights:  76%|███████▌  | 220/291 [00:04<00:01, 58.01it/s]Loading weights:  79%|███████▊  | 229/291 [00:04<00:01, 55.09it/s]Loading weights:  82%|████████▏ | 238/291 [00:04<00:00, 60.62it/s]Loading weights:  85%|████████▍ | 247/291 [00:04<00:00, 56.69it/s]Loading weights:  88%|████████▊ | 256/291 [00:05<00:00, 59.82it/s]Loading weights:  91%|█████████ | 265/291 [00:05<00:00, 56.87it/s]Loading weights:  94%|█████████▍| 274/291 [00:05<00:00, 61.91it/s]Loading weights:  97%|█████████▋| 283/291 [00:05<00:00, 56.47it/s]Loading weights: 100%|██████████| 291/291 [00:05<00:00, 52.73it/s]
+[bench] target ready: NousResearch/Meta-Llama-3.1-8B-Instruct
+[bench] target=NousResearch/Meta-Llama-3.1-8B-Instruct eagle_layers=[2, 16, 29]
+[bench] warmup done (spec + HF baseline)
+[01] new=130 rounds=52 tau=2.50 proposed/round=2.58 spec_tpot=14.0ms base_tpot=30.1ms lossless=True
+[02] new=130 rounds=50 tau=2.60 proposed/round=3.00 spec_tpot=13.6ms base_tpot=26.8ms lossless=True
+[03] new=133 rounds=54 tau=2.46 proposed/round=2.93 spec_tpot=14.3ms base_tpot=27.1ms lossless=True
+[04] new=130 rounds=52 tau=2.50 proposed/round=2.71 spec_tpot=14.1ms base_tpot=26.7ms lossless=True
+[05] new=130 rounds=43 tau=3.02 proposed/round=3.47 spec_tpot=11.8ms base_tpot=26.7ms lossless=True
+[06] new=134 rounds=43 tau=3.12 proposed/round=3.33 spec_tpot=11.4ms base_tpot=26.5ms lossless=True
+[07] new=135 rounds=50 tau=2.70 proposed/round=2.80 spec_tpot=13.3ms base_tpot=26.8ms lossless=True
+[08] new=130 rounds=45 tau=2.89 proposed/round=3.20 spec_tpot=12.3ms base_tpot=29.0ms lossless=True
+[09] new=130 rounds=47 tau=2.77 proposed/round=2.87 spec_tpot=12.9ms base_tpot=26.7ms lossless=True
+[10] new=130 rounds=46 tau=2.83 proposed/round=3.04 spec_tpot=12.5ms base_tpot=26.1ms lossless=False
+[transformers] Ignoring clean_up_tokenization_spaces=True for BPE tokenizer TokenizersBackend. The clean_up_tokenization post-processing step is designed for WordPiece tokenizers and is destructive for BPE (it strips spaces before punctuation). Set clean_up_tokenization_spaces=False to suppress this warning, or set clean_up_tokenization_spaces_for_bpe_even_though_it_will_corrupt_output=True to force cleanup anyway.
+     [diverge] at 32: spec=13('.') base=8844(' relative')
+     spec text: "Here's the explanation:\n\n**Step 1: Earth's Tilt**\nThe Earth is tilted on its axis at an angle of about 23.5 degrees. This means that as the Earth orbits the Sun, different parts of the planet are tilted towards or away from the Sun throughout the year.\n\n**Step 2: Sun's Position**\nAs the Earth orbits the Sun, the position of the Sun in the sky changes. When the Northern Hemisphere is tilted towards the Sun, it receives more direct sunlight and experiences longer days, while the Southern Hemisphere is tilted away and receives less sunlight.\n\n**Step 3: Seasonal Changes**\nAs the Earth"
+     base text: "Here's the explanation:\n\n**Step 1: Earth's Tilt**\nThe Earth is tilted on its axis at an angle of about 23.5 degrees relative to its orbit around the Sun. This tilt is the primary reason for the changing seasons.\n\n**Step 2: Earth's Orbit**\nAs the Earth orbits the Sun, different parts of the planet receive varying amounts of sunlight throughout the year. The tilt of the Earth's axis means that the amount of sunlight that reaches the Earth's surface changes as the planet moves around the Sun.\n\n**Step 3: Sun's Position**\nWhen the Northern Hemisphere is tilted towards the Sun, it receives"
+     logits gap(top1-top2)=0.015625 top5=8844(' relative'):28.1562, 13('.'):28.1406, 439(' as'):27.1406, 11(','):26.8125, 505(' from'):22.5000
+
+==================== EAGLE3 accept + TPOT ====================
+mode=text dtype=float16 explain=True
+target=NousResearch/Meta-Llama-3.1-8B-Instruct draft=yuhuili/EAGLE3-LLaMA3.1-Instruct-8B
+num_prompts=10 max_new_tokens=130
+tree: mode=eagle2_batch preconsume=True skip_replay=True cuda_graph=True draft_graph=True svd_rank=128 topk(width)=8 num_steps(depth)=8 max_tree_nodes=64
+total_new_tokens=1312 total_rounds=482
+accepted_tokens=1312 proposed_draft_tokens=1434
+tau(accept_length)=2.722 proposed/round=2.975
+tree_nodes/round=65.00 (verify 实际算了这么多节点)
+ms/round=35.45
+spec:   TPOT=13.02ms  throughput=76.79 tok/s  wall=17.09s
+baseline: TPOT=27.26ms  throughput=36.69 tok/s  wall=35.44s
+speedup=2.09x  lossless(all)=False
+=============================================================
+===== mode=text config=svd_r256 =====
+[bench] loading target NousResearch/Meta-Llama-3.1-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 1/291 [00:00<03:20,  1.44it/s]Loading weights:  11%|█▏        | 33/291 [00:00<00:04, 55.53it/s]Loading weights:  18%|█▊        | 52/291 [00:01<00:04, 58.74it/s]Loading weights:  22%|██▏       | 65/291 [00:01<00:03, 70.14it/s]Loading weights:  27%|██▋       | 78/291 [00:01<00:03, 60.20it/s]Loading weights:  30%|███       | 88/291 [00:01<00:03, 64.85it/s]Loading weights:  34%|███▎      | 98/291 [00:01<00:03, 60.57it/s]Loading weights:  36%|███▋      | 106/291 [00:01<00:02, 62.82it/s]Loading weights:  39%|███▉      | 114/291 [00:02<00:03, 56.97it/s]Loading weights:  42%|████▏     | 121/291 [00:02<00:02, 59.24it/s]Loading weights:  45%|████▍     | 130/291 [00:02<00:02, 62.28it/s]Loading weights:  48%|████▊     | 139/291 [00:02<00:02, 57.24it/s]Loading weights:  51%|█████     | 149/291 [00:02<00:02, 56.81it/s]Loading weights:  54%|█████▍    | 157/291 [00:02<00:02, 59.64it/s]Loading weights:  57%|█████▋    | 166/291 [00:02<00:01, 66.40it/s]Loading weights:  60%|██████    | 175/291 [00:03<00:01, 60.28it/s]Loading weights:  63%|██████▎   | 184/291 [00:03<00:01, 62.95it/s]Loading weights:  66%|██████▋   | 193/291 [00:03<00:01, 58.83it/s]Loading weights:  69%|██████▉   | 202/291 [00:03<00:01, 63.52it/s]Loading weights:  73%|███████▎  | 211/291 [00:03<00:01, 58.61it/s]Loading weights:  76%|███████▌  | 220/291 [00:03<00:01, 64.08it/s]Loading weights:  79%|███████▊  | 229/291 [00:03<00:00, 68.23it/s]Loading weights:  82%|████████▏ | 238/291 [00:04<00:00, 61.08it/s]Loading weights:  85%|████████▍ | 247/291 [00:04<00:00, 65.61it/s]Loading weights:  88%|████████▊ | 256/291 [00:04<00:00, 58.57it/s]Loading weights:  91%|█████████ | 265/291 [00:04<00:00, 64.21it/s]Loading weights:  95%|█████████▍| 275/291 [00:04<00:00, 60.91it/s]Loading weights:  97%|█████████▋| 283/291 [00:04<00:00, 63.64it/s]Loading weights: 100%|██████████| 291/291 [00:04<00:00, 60.51it/s]
+[bench] target ready: NousResearch/Meta-Llama-3.1-8B-Instruct
+[bench] target=NousResearch/Meta-Llama-3.1-8B-Instruct eagle_layers=[2, 16, 29]
+[bench] warmup done (spec + HF baseline)
+[01] new=130 rounds=50 tau=2.60 proposed/round=2.84 spec_tpot=13.3ms base_tpot=24.5ms lossless=True
+[02] new=130 rounds=42 tau=3.10 proposed/round=3.33 spec_tpot=11.1ms base_tpot=24.0ms lossless=True
+[03] new=135 rounds=49 tau=2.76 proposed/round=2.98 spec_tpot=12.5ms base_tpot=23.7ms lossless=True
+[04] new=130 rounds=48 tau=2.71 proposed/round=3.04 spec_tpot=12.7ms base_tpot=24.1ms lossless=True
+[05] new=130 rounds=32 tau=4.06 proposed/round=4.22 spec_tpot=8.6ms base_tpot=24.4ms lossless=False
+[transformers] Ignoring clean_up_tokenization_spaces=True for BPE tokenizer TokenizersBackend. The clean_up_tokenization post-processing step is designed for WordPiece tokenizers and is destructive for BPE (it strips spaces before punctuation). Set clean_up_tokenization_spaces=False to suppress this warning, or set clean_up_tokenization_spaces_for_bpe_even_though_it_will_corrupt_output=True to force cleanup anyway.
+     [diverge] at 9: spec=279(' the') base=865(' x')
+     spec text: 'To solve for x, we need to isolate the variable x on one side of the equation. Here are the steps:\n\n**Step 1: Subtract 7 from both sides of the equation**\n\nThe equation is: 3x + 7 = 22\n\nSubtracting 7 from both sides gives us: 3x = 22 - 7\n3x = 15\n\n**Step 2: Divide both sides of the equation by 3**\n\nNow we have: 3x = 15\n\nDividing both sides by 3 gives us: x = 15 ÷ 3\nx = 5\n\n'
+     base text: 'To solve for x, we need to isolate x on one side of the equation. Here are the steps:\n\n**Step 1: Subtract 7 from both sides of the equation**\n\nThe equation is: 3x + 7 = 22\n\nSubtracting 7 from both sides gives us: 3x = 22 - 7\n3x = 15\n\n**Step 2: Divide both sides of the equation by 3**\n\nNow we have: 3x = 15\n\nDividing both sides by 3 gives us: x = 15 ÷ 3\nx = 5\n\n**Step'
+     logits gap(top1-top2)=0.031250 top5=865(' x'):32.0938, 279(' the'):32.0625, 433(' it'):25.6094, 3977(' variable'):19.1875, 320(' ('):18.6406
+[06] new=131 rounds=38 tau=3.45 proposed/round=3.61 spec_tpot=10.1ms base_tpot=24.0ms lossless=True
+[07] new=131 rounds=44 tau=2.98 proposed/round=3.14 spec_tpot=11.7ms base_tpot=24.6ms lossless=True
+[08] new=130 rounds=37 tau=3.51 proposed/round=3.73 spec_tpot=9.9ms base_tpot=23.8ms lossless=True
+[09] new=130 rounds=45 tau=2.89 proposed/round=3.24 spec_tpot=12.0ms base_tpot=24.2ms lossless=True
+[10] new=133 rounds=45 tau=2.96 proposed/round=3.31 spec_tpot=11.7ms base_tpot=24.8ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=text dtype=float16 explain=True
+target=NousResearch/Meta-Llama-3.1-8B-Instruct draft=yuhuili/EAGLE3-LLaMA3.1-Instruct-8B
+num_prompts=10 max_new_tokens=130
+tree: mode=eagle2_batch preconsume=True skip_replay=True cuda_graph=True draft_graph=True svd_rank=256 topk(width)=8 num_steps(depth)=8 max_tree_nodes=64
+total_new_tokens=1310 total_rounds=430
+accepted_tokens=1310 proposed_draft_tokens=1417
+tau(accept_length)=3.047 proposed/round=3.295
+tree_nodes/round=65.00 (verify 实际算了这么多节点)
+ms/round=34.61
+spec:   TPOT=11.36ms  throughput=88.03 tok/s  wall=14.88s
+baseline: TPOT=24.21ms  throughput=41.31 tok/s  wall=31.47s
+speedup=2.13x  lossless(all)=False
+=============================================================
+===== mode=text config=svd_r512 =====
+[bench] loading target NousResearch/Meta-Llama-3.1-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 1/291 [00:00<03:51,  1.25it/s]Loading weights:  11%|█         | 31/291 [00:00<00:05, 45.18it/s]Loading weights:  16%|█▌        | 46/291 [00:01<00:04, 54.90it/s]Loading weights:  20%|█▉        | 58/291 [00:01<00:04, 55.65it/s]Loading weights:  23%|██▎       | 68/291 [00:01<00:04, 53.95it/s]Loading weights:  26%|██▌       | 76/291 [00:01<00:03, 56.90it/s]Loading weights:  29%|██▉       | 85/291 [00:01<00:03, 54.54it/s]Loading weights:  32%|███▏      | 94/291 [00:02<00:03, 52.46it/s]Loading weights:  35%|███▌      | 103/291 [00:02<00:03, 58.55it/s]Loading weights:  38%|███▊      | 112/291 [00:02<00:03, 54.48it/s]Loading weights:  42%|████▏     | 121/291 [00:02<00:02, 60.98it/s]Loading weights:  45%|████▍     | 130/291 [00:02<00:02, 65.66it/s]Loading weights:  48%|████▊     | 139/291 [00:02<00:02, 58.74it/s]Loading weights:  51%|█████     | 148/291 [00:02<00:02, 64.83it/s]Loading weights:  54%|█████▍    | 157/291 [00:03<00:02, 58.49it/s]Loading weights:  57%|█████▋    | 166/291 [00:03<00:01, 62.97it/s]Loading weights:  60%|██████    | 176/291 [00:03<00:01, 59.35it/s]Loading weights:  64%|██████▎   | 185/291 [00:03<00:01, 65.92it/s]Loading weights:  66%|██████▋   | 193/291 [00:03<00:01, 68.68it/s]Loading weights:  69%|██████▉   | 202/291 [00:03<00:01, 59.34it/s]Loading weights:  73%|███████▎  | 211/291 [00:03<00:01, 65.85it/s]Loading weights:  76%|███████▌  | 220/291 [00:04<00:01, 58.19it/s]Loading weights:  79%|███████▊  | 229/291 [00:04<00:00, 64.51it/s]Loading weights:  82%|████████▏ | 238/291 [00:04<00:00, 58.98it/s]Loading weights:  85%|████████▍ | 247/291 [00:04<00:00, 62.78it/s]Loading weights:  88%|████████▊ | 257/291 [00:04<00:00, 60.33it/s]Loading weights:  91%|█████████ | 264/291 [00:04<00:00, 62.26it/s]Loading weights:  94%|█████████▍| 274/291 [00:04<00:00, 58.59it/s]Loading weights:  97%|█████████▋| 283/291 [00:05<00:00, 62.68it/s]Loading weights: 100%|██████████| 291/291 [00:05<00:00, 57.96it/s]
+[bench] target ready: NousResearch/Meta-Llama-3.1-8B-Instruct
+[bench] target=NousResearch/Meta-Llama-3.1-8B-Instruct eagle_layers=[2, 16, 29]
+[bench] warmup done (spec + HF baseline)
+[01] new=130 rounds=46 tau=2.83 proposed/round=3.00 spec_tpot=12.3ms base_tpot=24.2ms lossless=True
+[02] new=131 rounds=34 tau=3.85 proposed/round=4.21 spec_tpot=9.1ms base_tpot=24.2ms lossless=True
+[03] new=135 rounds=37 tau=3.65 proposed/round=3.97 spec_tpot=9.6ms base_tpot=24.1ms lossless=True
+[04] new=132 rounds=38 tau=3.47 proposed/round=3.76 spec_tpot=10.0ms base_tpot=24.0ms lossless=True
+[05] new=130 rounds=28 tau=4.64 proposed/round=4.79 spec_tpot=7.6ms base_tpot=24.7ms lossless=False
+[transformers] Ignoring clean_up_tokenization_spaces=True for BPE tokenizer TokenizersBackend. The clean_up_tokenization post-processing step is designed for WordPiece tokenizers and is destructive for BPE (it strips spaces before punctuation). Set clean_up_tokenization_spaces=False to suppress this warning, or set clean_up_tokenization_spaces_for_bpe_even_though_it_will_corrupt_output=True to force cleanup anyway.
+     [diverge] at 9: spec=279(' the') base=865(' x')
+     spec text: 'To solve for x, we need to isolate the variable x on one side of the equation. Here are the steps:\n\n**Step 1: Subtract 7 from both sides of the equation**\n\nThe equation is: 3x + 7 = 22\n\nSubtracting 7 from both sides gives us: 3x = 22 - 7\n3x = 15\n\n**Step 2: Divide both sides of the equation by 3**\n\nNow we have: 3x = 15\n\nDividing both sides by 3 gives us: x = 15 ÷ 3\nx = 5\n\n'
+     base text: 'To solve for x, we need to isolate x on one side of the equation. Here are the steps:\n\n**Step 1: Subtract 7 from both sides of the equation**\n\nThe equation is: 3x + 7 = 22\n\nSubtracting 7 from both sides gives us: 3x = 22 - 7\n3x = 15\n\n**Step 2: Divide both sides of the equation by 3**\n\nNow we have: 3x = 15\n\nDividing both sides by 3 gives us: x = 15 ÷ 3\nx = 5\n\n**Step'
+     logits gap(top1-top2)=0.031250 top5=865(' x'):32.0938, 279(' the'):32.0625, 433(' it'):25.6094, 3977(' variable'):19.1875, 320(' ('):18.6406
+[06] new=130 rounds=36 tau=3.61 proposed/round=3.92 spec_tpot=9.7ms base_tpot=24.2ms lossless=True
+[07] new=130 rounds=39 tau=3.33 proposed/round=3.38 spec_tpot=10.5ms base_tpot=24.1ms lossless=True
+[08] new=130 rounds=37 tau=3.51 proposed/round=3.89 spec_tpot=10.2ms base_tpot=24.6ms lossless=True
+[09] new=130 rounds=42 tau=3.10 proposed/round=3.33 spec_tpot=11.3ms base_tpot=24.2ms lossless=True
+[10] new=133 rounds=39 tau=3.41 proposed/round=3.69 spec_tpot=10.4ms base_tpot=25.0ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=text dtype=float16 explain=True
+target=NousResearch/Meta-Llama-3.1-8B-Instruct draft=yuhuili/EAGLE3-LLaMA3.1-Instruct-8B
+num_prompts=10 max_new_tokens=130
+tree: mode=eagle2_batch preconsume=True skip_replay=True cuda_graph=True draft_graph=True svd_rank=512 topk(width)=8 num_steps(depth)=8 max_tree_nodes=64
+total_new_tokens=1311 total_rounds=376
+accepted_tokens=1311 proposed_draft_tokens=1406
+tau(accept_length)=3.487 proposed/round=3.739
+tree_nodes/round=65.00 (verify 实际算了这么多节点)
+ms/round=35.10
+spec:   TPOT=10.07ms  throughput=99.32 tok/s  wall=13.20s
+baseline: TPOT=24.33ms  throughput=41.10 tok/s  wall=31.63s
+speedup=2.42x  lossless(all)=False
+=============================================================
+===== mode=vl config=eager =====
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   0%|          | 1/750 [00:00<06:07,  2.04it/s]Loading weights:   6%|▋         | 48/750 [00:00<00:08, 86.78it/s]Loading weights:   8%|▊         | 62/750 [00:00<00:08, 82.77it/s]Loading weights:  10%|▉         | 73/750 [00:01<00:09, 74.47it/s]Loading weights:  11%|█         | 82/750 [00:01<00:08, 76.98it/s]Loading weights:  12%|█▏        | 92/750 [00:01<00:08, 80.71it/s]Loading weights:  14%|█▎        | 103/750 [00:01<00:08, 72.16it/s]Loading weights:  15%|█▌        | 114/750 [00:01<00:08, 79.43it/s]Loading weights:  17%|█▋        | 125/750 [00:01<00:07, 83.76it/s]Loading weights:  18%|█▊        | 136/750 [00:01<00:07, 76.96it/s]Loading weights:  20%|█▉        | 147/750 [00:01<00:07, 83.18it/s]Loading weights:  21%|██        | 158/750 [00:02<00:06, 85.77it/s]Loading weights:  23%|██▎       | 169/750 [00:02<00:07, 75.05it/s]Loading weights:  24%|██▍       | 180/750 [00:02<00:06, 82.49it/s]Loading weights:  25%|██▌       | 191/750 [00:02<00:06, 88.44it/s]Loading weights:  27%|██▋       | 202/750 [00:02<00:07, 78.21it/s]Loading weights:  28%|██▊       | 213/750 [00:02<00:06, 84.10it/s]Loading weights:  30%|██▉       | 224/750 [00:02<00:05, 88.48it/s]Loading weights:  31%|███       | 234/750 [00:02<00:05, 90.47it/s]Loading weights:  33%|███▎      | 244/750 [00:03<00:05, 92.37it/s]Loading weights:  34%|███▍      | 257/750 [00:03<00:06, 81.90it/s]Loading weights:  36%|███▌      | 268/750 [00:03<00:06, 73.87it/s]Loading weights:  37%|███▋      | 279/750 [00:03<00:05, 79.15it/s]Loading weights:  39%|███▊      | 290/750 [00:03<00:05, 84.81it/s]Loading weights:  40%|████      | 301/750 [00:03<00:05, 76.19it/s]Loading weights:  42%|████▏     | 312/750 [00:03<00:05, 81.69it/s]Loading weights:  43%|████▎     | 323/750 [00:04<00:04, 86.80it/s]Loading weights:  45%|████▍     | 334/750 [00:04<00:04, 92.24it/s]Loading weights:  46%|████▌     | 345/750 [00:04<00:05, 76.24it/s]Loading weights:  49%|████▉     | 367/750 [00:04<00:04, 89.71it/s]Loading weights:  50%|█████     | 378/750 [00:04<00:03, 93.65it/s]Loading weights:  52%|█████▏    | 389/750 [00:04<00:04, 82.59it/s]Loading weights:  57%|█████▋    | 428/750 [00:04<00:02, 148.94it/s]Loading weights:  62%|██████▏   | 463/750 [00:05<00:01, 195.37it/s]Loading weights:  66%|██████▌   | 495/750 [00:05<00:01, 226.75it/s]Loading weights:  75%|███████▍  | 561/750 [00:05<00:00, 340.20it/s]Loading weights:  82%|████████▏ | 617/750 [00:05<00:00, 400.00it/s]Loading weights:  88%|████████▊ | 660/750 [00:05<00:00, 403.28it/s]Loading weights:  94%|█████████▎| 703/750 [00:05<00:00, 410.65it/s]Loading weights:  99%|█████████▉| 746/750 [00:05<00:00, 318.45it/s]Loading weights: 100%|██████████| 750/750 [00:05<00:00, 129.56it/s]
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done (spec + HF baseline)
+[01] new=131 rounds=34 tau=3.85 proposed/round=3.97 spec_tpot=20.5ms base_tpot=39.5ms lossless=True
+[02] new=134 rounds=32 tau=4.19 proposed/round=4.06 spec_tpot=15.1ms base_tpot=35.0ms lossless=True
+[03] new=132 rounds=42 tau=3.14 proposed/round=3.14 spec_tpot=20.3ms base_tpot=36.2ms lossless=True
+[04] new=137 rounds=43 tau=3.19 proposed/round=3.28 spec_tpot=19.2ms base_tpot=36.5ms lossless=True
+[05] new=133 rounds=34 tau=3.91 proposed/round=3.68 spec_tpot=15.7ms base_tpot=34.3ms lossless=True
+[06] new=136 rounds=31 tau=4.39 proposed/round=4.29 spec_tpot=13.7ms base_tpot=35.1ms lossless=True
+[07] new=131 rounds=39 tau=3.36 proposed/round=3.33 spec_tpot=17.6ms base_tpot=34.1ms lossless=True
+[08] new=136 rounds=28 tau=4.86 proposed/round=4.57 spec_tpot=12.4ms base_tpot=35.2ms lossless=True
+[09] new=132 rounds=42 tau=3.14 proposed/round=3.14 spec_tpot=24.0ms base_tpot=34.9ms lossless=True
+[10] new=130 rounds=36 tau=3.61 proposed/round=3.58 spec_tpot=16.6ms base_tpot=33.6ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=130
+tree: mode=eagle2_batch preconsume=True skip_replay=True cuda_graph=False draft_graph=False svd_rank=0 topk(width)=8 num_steps(depth)=8 max_tree_nodes=64
+total_new_tokens=1332 total_rounds=361
+accepted_tokens=1332 proposed_draft_tokens=1315
+tau(accept_length)=3.690 proposed/round=3.643
+tree_nodes/round=65.00 (verify 实际算了这么多节点)
+ms/round=64.47
+spec:   TPOT=17.47ms  throughput=57.23 tok/s  wall=23.27s
+baseline: TPOT=35.43ms  throughput=28.23 tok/s  wall=46.06s
+speedup=2.03x  lossless(all)=True
+=============================================================
+===== mode=vl config=target_graph =====
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   0%|          | 1/750 [00:00<03:22,  3.70it/s]Loading weights:   4%|▎         | 28/750 [00:00<00:07, 95.41it/s]Loading weights:   6%|▌         | 44/750 [00:00<00:06, 112.90it/s]Loading weights:   8%|▊         | 60/750 [00:00<00:08, 79.25it/s] Loading weights:  10%|▉         | 72/750 [00:00<00:09, 73.43it/s]Loading weights:  11%|█         | 82/750 [00:01<00:08, 77.78it/s]Loading weights:  12%|█▏        | 92/750 [00:01<00:08, 80.03it/s]Loading weights:  14%|█▎        | 103/750 [00:01<00:09, 71.81it/s]Loading weights:  15%|█▌        | 114/750 [00:01<00:08, 78.59it/s]Loading weights:  17%|█▋        | 125/750 [00:01<00:08, 71.81it/s]Loading weights:  18%|█▊        | 136/750 [00:01<00:07, 78.14it/s]Loading weights:  20%|█▉        | 147/750 [00:01<00:08, 71.62it/s]Loading weights:  21%|██        | 158/750 [00:02<00:07, 77.05it/s]Loading weights:  23%|██▎       | 169/750 [00:02<00:08, 70.30it/s]Loading weights:  24%|██▍       | 180/750 [00:02<00:07, 76.69it/s]Loading weights:  25%|██▌       | 191/750 [00:02<00:06, 83.65it/s]Loading weights:  27%|██▋       | 202/750 [00:02<00:07, 74.21it/s]Loading weights:  28%|██▊       | 213/750 [00:02<00:06, 80.62it/s]Loading weights:  30%|██▉       | 224/750 [00:02<00:07, 71.30it/s]Loading weights:  31%|███▏      | 235/750 [00:03<00:06, 78.95it/s]Loading weights:  33%|███▎      | 246/750 [00:03<00:07, 69.76it/s]Loading weights:  34%|███▍      | 257/750 [00:03<00:07, 67.23it/s]Loading weights:  36%|███▌      | 268/750 [00:03<00:06, 73.12it/s]Loading weights:  37%|███▋      | 279/750 [00:03<00:06, 68.70it/s]Loading weights:  39%|███▊      | 290/750 [00:03<00:06, 75.81it/s]Loading weights:  40%|████      | 301/750 [00:03<00:05, 81.37it/s]Loading weights:  42%|████▏     | 312/750 [00:04<00:06, 70.26it/s]Loading weights:  43%|████▎     | 323/750 [00:04<00:06, 67.74it/s]Loading weights:  45%|████▍     | 336/750 [00:04<00:05, 79.63it/s]Loading weights:  46%|████▌     | 345/750 [00:04<00:05, 68.19it/s]Loading weights:  47%|████▋     | 356/750 [00:04<00:05, 75.42it/s]Loading weights:  49%|████▉     | 367/750 [00:04<00:05, 68.50it/s]Loading weights:  50%|█████     | 378/750 [00:05<00:04, 75.76it/s]Loading weights:  52%|█████▏    | 389/750 [00:05<00:04, 82.29it/s]Loading weights:  62%|██████▏   | 463/750 [00:05<00:01, 203.85it/s]Loading weights:  69%|██████▊   | 515/750 [00:05<00:00, 274.01it/s]Loading weights:  73%|███████▎  | 551/750 [00:05<00:00, 294.34it/s]Loading weights:  81%|████████▏ | 611/750 [00:05<00:00, 368.04it/s]Loading weights:  89%|████████▉ | 671/750 [00:05<00:00, 429.81it/s]Loading weights:  95%|█████████▌| 716/750 [00:05<00:00, 433.60it/s]Loading weights: 100%|██████████| 750/750 [00:05<00:00, 125.19it/s]
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done (spec + HF baseline)
+[01] new=131 rounds=34 tau=3.85 proposed/round=3.97 spec_tpot=12.2ms base_tpot=37.5ms lossless=True
+[02] new=134 rounds=32 tau=4.19 proposed/round=4.06 spec_tpot=12.2ms base_tpot=39.5ms lossless=True
+[03] new=132 rounds=42 tau=3.14 proposed/round=3.14 spec_tpot=14.9ms base_tpot=33.7ms lossless=True
+[04] new=137 rounds=43 tau=3.19 proposed/round=3.28 spec_tpot=14.2ms base_tpot=38.6ms lossless=True
+[05] new=133 rounds=34 tau=3.91 proposed/round=3.68 spec_tpot=12.3ms base_tpot=42.5ms lossless=True
+[06] new=136 rounds=31 tau=4.39 proposed/round=4.26 spec_tpot=11.2ms base_tpot=37.8ms lossless=True
+[07] new=131 rounds=39 tau=3.36 proposed/round=3.33 spec_tpot=14.8ms base_tpot=42.2ms lossless=True
+[08] new=136 rounds=28 tau=4.86 proposed/round=4.57 spec_tpot=9.7ms base_tpot=36.2ms lossless=True
+[09] new=132 rounds=42 tau=3.14 proposed/round=3.14 spec_tpot=15.1ms base_tpot=35.9ms lossless=True
+[10] new=130 rounds=36 tau=3.61 proposed/round=3.58 spec_tpot=13.3ms base_tpot=35.4ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=130
+tree: mode=eagle2_batch preconsume=True skip_replay=True cuda_graph=True draft_graph=False svd_rank=0 topk(width)=8 num_steps(depth)=8 max_tree_nodes=64
+total_new_tokens=1332 total_rounds=361
+accepted_tokens=1332 proposed_draft_tokens=1314
+tau(accept_length)=3.690 proposed/round=3.640
+tree_nodes/round=65.00 (verify 实际算了这么多节点)
+ms/round=47.91
+spec:   TPOT=12.98ms  throughput=77.02 tok/s  wall=17.29s
+baseline: TPOT=37.93ms  throughput=26.37 tok/s  wall=49.30s
+speedup=2.92x  lossless(all)=True
+=============================================================
+===== mode=vl config=full =====
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   0%|          | 1/750 [00:00<02:30,  4.99it/s]Loading weights:   0%|          | 2/750 [00:00<02:28,  5.02it/s]Loading weights:   6%|▌         | 45/750 [00:00<00:05, 130.89it/s]Loading weights:   9%|▊         | 65/750 [00:00<00:05, 115.89it/s]Loading weights:  11%|█         | 81/750 [00:01<00:08, 75.54it/s] Loading weights:  12%|█▏        | 93/750 [00:01<00:08, 79.20it/s]Loading weights:  15%|█▌        | 114/750 [00:01<00:08, 78.42it/s]Loading weights:  17%|█▋        | 125/750 [00:01<00:07, 83.78it/s]Loading weights:  18%|█▊        | 136/750 [00:01<00:07, 86.81it/s]Loading weights:  20%|█▉        | 147/750 [00:01<00:06, 91.71it/s]Loading weights:  21%|██        | 158/750 [00:01<00:06, 95.15it/s]Loading weights:  23%|██▎       | 169/750 [00:02<00:07, 81.25it/s]Loading weights:  24%|██▍       | 180/750 [00:02<00:06, 85.03it/s]Loading weights:  25%|██▌       | 191/750 [00:02<00:06, 90.30it/s]Loading weights:  27%|██▋       | 202/750 [00:02<00:05, 94.40it/s]Loading weights:  29%|██▊       | 214/750 [00:02<00:06, 84.13it/s]Loading weights:  30%|██▉       | 224/750 [00:02<00:05, 87.68it/s]Loading weights:  31%|███▏      | 235/750 [00:02<00:05, 90.45it/s]Loading weights:  33%|███▎      | 246/750 [00:02<00:06, 78.50it/s]Loading weights:  34%|███▍      | 257/750 [00:03<00:05, 83.74it/s]Loading weights:  36%|███▌      | 268/750 [00:03<00:05, 86.82it/s]Loading weights:  37%|███▋      | 279/750 [00:03<00:06, 78.25it/s]Loading weights:  39%|███▊      | 290/750 [00:03<00:05, 83.01it/s]Loading weights:  40%|████      | 301/750 [00:03<00:05, 88.12it/s]Loading weights:  42%|████▏     | 312/750 [00:03<00:05, 76.49it/s]Loading weights:  43%|████▎     | 323/750 [00:03<00:05, 81.75it/s]Loading weights:  45%|████▍     | 334/750 [00:04<00:04, 86.92it/s]Loading weights:  46%|████▌     | 345/750 [00:04<00:05, 75.52it/s]Loading weights:  47%|████▋     | 356/750 [00:04<00:04, 82.71it/s]Loading weights:  49%|████▉     | 367/750 [00:04<00:04, 89.33it/s]Loading weights:  50%|█████     | 378/750 [00:04<00:04, 75.79it/s]Loading weights:  52%|█████▏    | 391/750 [00:04<00:04, 87.54it/s]Loading weights:  59%|█████▊    | 439/750 [00:04<00:01, 182.34it/s]Loading weights:  67%|██████▋   | 500/750 [00:04<00:01, 245.33it/s]Loading weights:  71%|███████▏  | 535/750 [00:05<00:00, 269.49it/s]Loading weights:  80%|████████  | 603/750 [00:05<00:00, 372.76it/s]Loading weights:  86%|████████▌ | 646/750 [00:05<00:00, 387.77it/s]Loading weights:  94%|█████████▎| 702/750 [00:05<00:00, 429.91it/s]Loading weights: 100%|█████████▉| 747/750 [00:05<00:00, 341.94it/s]Loading weights: 100%|██████████| 750/750 [00:05<00:00, 134.35it/s]
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done (spec + HF baseline)
+[01] new=131 rounds=34 tau=3.85 proposed/round=3.97 spec_tpot=11.9ms base_tpot=38.0ms lossless=True
+[02] new=134 rounds=32 tau=4.19 proposed/round=4.06 spec_tpot=10.9ms base_tpot=42.3ms lossless=True
+[03] new=132 rounds=42 tau=3.14 proposed/round=3.14 spec_tpot=14.6ms base_tpot=39.5ms lossless=True
+[04] new=137 rounds=43 tau=3.19 proposed/round=3.28 spec_tpot=14.0ms base_tpot=38.7ms lossless=True
+[05] new=133 rounds=34 tau=3.91 proposed/round=3.68 spec_tpot=11.9ms base_tpot=49.7ms lossless=True
+[06] new=136 rounds=31 tau=4.39 proposed/round=4.26 spec_tpot=10.6ms base_tpot=41.7ms lossless=True
+[07] new=131 rounds=39 tau=3.36 proposed/round=3.33 spec_tpot=13.0ms base_tpot=46.2ms lossless=True
+[08] new=136 rounds=28 tau=4.86 proposed/round=4.57 spec_tpot=9.3ms base_tpot=38.9ms lossless=True
+[09] new=132 rounds=42 tau=3.14 proposed/round=3.14 spec_tpot=14.4ms base_tpot=38.9ms lossless=True
+[10] new=130 rounds=36 tau=3.61 proposed/round=3.58 spec_tpot=12.8ms base_tpot=39.5ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=130
+tree: mode=eagle2_batch preconsume=True skip_replay=True cuda_graph=True draft_graph=True svd_rank=0 topk(width)=8 num_steps(depth)=8 max_tree_nodes=64
+total_new_tokens=1332 total_rounds=361
+accepted_tokens=1332 proposed_draft_tokens=1314
+tau(accept_length)=3.690 proposed/round=3.640
+tree_nodes/round=65.00 (verify 实际算了这么多节点)
+ms/round=45.51
+spec:   TPOT=12.33ms  throughput=81.07 tok/s  wall=16.43s
+baseline: TPOT=41.34ms  throughput=24.19 tok/s  wall=53.74s
+speedup=3.35x  lossless(all)=True
+=============================================================
+===== mode=vl config=svd_r128 =====
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   0%|          | 1/750 [00:00<07:14,  1.72it/s]Loading weights:   5%|▌         | 38/750 [00:00<00:09, 73.45it/s]Loading weights:   8%|▊         | 59/750 [00:01<00:09, 70.48it/s]Loading weights:  10%|▉         | 74/750 [00:01<00:09, 73.36it/s]Loading weights:  12%|█▏        | 87/750 [00:01<00:08, 82.35it/s]Loading weights:  13%|█▎        | 99/750 [00:01<00:08, 75.97it/s]Loading weights:  15%|█▍        | 109/750 [00:01<00:08, 78.79it/s]Loading weights:  16%|█▌        | 119/750 [00:01<00:09, 66.99it/s]Loading weights:  17%|█▋        | 128/750 [00:01<00:09, 62.49it/s]Loading weights:  18%|█▊        | 136/750 [00:02<00:09, 64.43it/s]Loading weights:  20%|█▉        | 147/750 [00:02<00:09, 60.61it/s]Loading weights:  21%|██        | 159/750 [00:02<00:08, 72.29it/s]Loading weights:  23%|██▎       | 169/750 [00:02<00:08, 65.39it/s]Loading weights:  24%|██▍       | 180/750 [00:02<00:07, 73.99it/s]Loading weights:  25%|██▌       | 191/750 [00:02<00:08, 68.88it/s]Loading weights:  27%|██▋       | 202/750 [00:02<00:07, 75.65it/s]Loading weights:  28%|██▊       | 213/750 [00:03<00:06, 83.14it/s]Loading weights:  30%|██▉       | 224/750 [00:03<00:06, 87.33it/s]Loading weights:  31%|███▏      | 235/750 [00:03<00:06, 76.74it/s]Loading weights:  33%|███▎      | 246/750 [00:03<00:07, 68.18it/s]Loading weights:  35%|███▌      | 265/750 [00:03<00:05, 93.60it/s]Loading weights:  37%|███▋      | 276/750 [00:03<00:04, 94.84it/s]Loading weights:  38%|███▊      | 287/750 [00:04<00:05, 80.24it/s]Loading weights:  40%|███▉      | 297/750 [00:04<00:06, 72.10it/s]Loading weights:  41%|████      | 306/750 [00:04<00:06, 73.29it/s]Loading weights:  42%|████▏     | 314/750 [00:04<00:05, 73.80it/s]Loading weights:  43%|████▎     | 323/750 [00:04<00:06, 64.64it/s]Loading weights:  45%|████▍     | 334/750 [00:04<00:05, 72.29it/s]Loading weights:  46%|████▌     | 345/750 [00:04<00:06, 66.47it/s]Loading weights:  47%|████▋     | 356/750 [00:05<00:06, 63.02it/s]Loading weights:  49%|████▉     | 368/750 [00:05<00:05, 73.31it/s]Loading weights:  50%|█████     | 378/750 [00:05<00:04, 76.59it/s]Loading weights:  52%|█████▏    | 389/750 [00:05<00:04, 83.95it/s]Loading weights:  60%|█████▉    | 449/750 [00:05<00:01, 182.19it/s]Loading weights:  68%|██████▊   | 507/750 [00:05<00:00, 275.21it/s]Loading weights:  72%|███████▏  | 539/750 [00:05<00:00, 285.46it/s]Loading weights:  78%|███████▊  | 585/750 [00:05<00:00, 331.05it/s]Loading weights:  84%|████████▍ | 633/750 [00:05<00:00, 368.25it/s]Loading weights:  90%|████████▉ | 672/750 [00:06<00:00, 373.38it/s]Loading weights:  95%|█████████▌| 715/750 [00:06<00:00, 388.55it/s]Loading weights: 100%|██████████| 750/750 [00:06<00:00, 117.53it/s]
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done (spec + HF baseline)
+[01] new=131 rounds=34 tau=3.85 proposed/round=3.91 spec_tpot=11.5ms base_tpot=38.0ms lossless=True
+[02] new=134 rounds=34 tau=3.94 proposed/round=4.06 spec_tpot=10.9ms base_tpot=34.8ms lossless=True
+[03] new=132 rounds=45 tau=2.93 proposed/round=3.00 spec_tpot=14.4ms base_tpot=35.7ms lossless=True
+[04] new=137 rounds=43 tau=3.19 proposed/round=3.21 spec_tpot=13.2ms base_tpot=35.3ms lossless=True
+[05] new=133 rounds=35 tau=3.80 proposed/round=3.74 spec_tpot=11.2ms base_tpot=34.6ms lossless=True
+[06] new=138 rounds=34 tau=4.06 proposed/round=4.00 spec_tpot=10.4ms base_tpot=39.9ms lossless=False
+     [diverge] at 26: spec=66963(':**') base=323(' and')
+     spec text: 'To find the difference between the highest and the lowest green bar, we need to:\n\n1.  **Identify the green bars:** The green bars represent the percentage of respondents who believe Japan should "Play a more active military role".\n\n2.  **Find the value of each green bar:**\n    -   In 2016, the green bar shows 29%.\n    -   In 2015, the green bar shows 23%.\n\n3.  **Determine the highest and lowest values:**\n    -   The highest value is 29% (from 2016).\n   '
+     base text: 'To find the difference between the highest and the lowest green bar, we need to:\n\n1.  **Identify the green bars and their values:**\n    -   The green bars represent the percentage of respondents who believe Japan should "Play a more active military role".\n    -   In 2016, the green bar value is **29%**.\n    -   In 2015, the green bar value is **23%**.\n\n2.  **Determine the highest and lowest values among these green bars:**\n    -   The highest value is **29%** (from 20'
+     logits gap(top1-top2)=0.000000 top5=323(' and'):39.6250, 66963(':**'):39.6250, 95518('**:'):39.3750, 13('.'):36.3125, 304(' in'):35.9062
+[07] new=132 rounds=43 tau=3.07 proposed/round=3.05 spec_tpot=14.0ms base_tpot=37.4ms lossless=True
+[08] new=136 rounds=29 tau=4.69 proposed/round=4.38 spec_tpot=8.9ms base_tpot=40.7ms lossless=True
+[09] new=132 rounds=46 tau=2.87 proposed/round=3.07 spec_tpot=14.9ms base_tpot=37.7ms lossless=True
+[10] new=130 rounds=38 tau=3.42 proposed/round=3.71 spec_tpot=12.6ms base_tpot=35.3ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=130
+tree: mode=eagle2_batch preconsume=True skip_replay=True cuda_graph=True draft_graph=True svd_rank=128 topk(width)=8 num_steps(depth)=8 max_tree_nodes=64
+total_new_tokens=1335 total_rounds=381
+accepted_tokens=1335 proposed_draft_tokens=1351
+tau(accept_length)=3.504 proposed/round=3.546
+tree_nodes/round=65.00 (verify 实际算了这么多节点)
+ms/round=42.70
+spec:   TPOT=12.19ms  throughput=82.06 tok/s  wall=16.27s
+baseline: TPOT=36.95ms  throughput=27.06 tok/s  wall=48.04s
+speedup=3.03x  lossless(all)=False
+=============================================================
+===== mode=vl config=svd_r256 =====
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   3%|▎         | 26/750 [00:00<00:03, 226.86it/s]Loading weights:   7%|▋         | 49/750 [00:00<00:06, 108.49it/s]Loading weights:   8%|▊         | 63/750 [00:00<00:07, 93.61it/s] Loading weights:  10%|▉         | 74/750 [00:00<00:06, 97.05it/s]Loading weights:  11%|█▏        | 85/750 [00:00<00:06, 98.19it/s]Loading weights:  13%|█▎        | 96/750 [00:01<00:07, 82.11it/s]Loading weights:  15%|█▍        | 111/750 [00:01<00:06, 97.63it/s]Loading weights:  16%|█▋        | 122/750 [00:01<00:07, 83.45it/s]Loading weights:  18%|█▊        | 132/750 [00:01<00:07, 83.64it/s]Loading weights:  19%|█▉        | 142/750 [00:01<00:07, 86.59it/s]Loading weights:  20%|██        | 152/750 [00:01<00:07, 75.07it/s]Loading weights:  21%|██▏       | 161/750 [00:01<00:07, 75.50it/s]Loading weights:  23%|██▎       | 170/750 [00:01<00:07, 78.62it/s]Loading weights:  24%|██▍       | 180/750 [00:02<00:08, 68.00it/s]Loading weights:  26%|██▌       | 193/750 [00:02<00:06, 80.48it/s]Loading weights:  27%|██▋       | 202/750 [00:02<00:06, 82.28it/s]Loading weights:  28%|██▊       | 213/750 [00:02<00:07, 72.39it/s]Loading weights:  30%|██▉       | 224/750 [00:02<00:06, 80.50it/s]Loading weights:  31%|███▏      | 235/750 [00:02<00:05, 87.47it/s]Loading weights:  33%|███▎      | 246/750 [00:02<00:05, 90.92it/s]Loading weights:  34%|███▍      | 257/750 [00:03<00:06, 77.49it/s]Loading weights:  36%|███▌      | 268/750 [00:03<00:06, 71.19it/s]Loading weights:  37%|███▋      | 279/750 [00:03<00:06, 77.79it/s]Loading weights:  39%|███▊      | 290/750 [00:03<00:05, 83.41it/s]Loading weights:  40%|████      | 302/750 [00:03<00:05, 75.76it/s]Loading weights:  42%|████▏     | 314/750 [00:03<00:06, 71.81it/s]Loading weights:  45%|████▍     | 334/750 [00:03<00:04, 94.46it/s]Loading weights:  46%|████▌     | 345/750 [00:04<00:04, 82.02it/s]Loading weights:  47%|████▋     | 356/750 [00:04<00:04, 86.71it/s]Loading weights:  49%|████▉     | 367/750 [00:04<00:04, 91.34it/s]Loading weights:  50%|█████     | 378/750 [00:04<00:04, 80.29it/s]Loading weights:  52%|█████▏    | 389/750 [00:04<00:04, 82.50it/s]Loading weights:  63%|██████▎   | 473/750 [00:04<00:01, 220.41it/s]Loading weights:  69%|██████▊   | 515/750 [00:04<00:00, 263.93it/s]Loading weights:  73%|███████▎  | 549/750 [00:04<00:00, 279.33it/s]Loading weights:  79%|███████▉  | 592/750 [00:05<00:00, 317.42it/s]Loading weights:  85%|████████▌ | 641/750 [00:05<00:00, 358.50it/s]Loading weights:  91%|█████████ | 683/750 [00:05<00:00, 374.92it/s]Loading weights:  97%|█████████▋| 725/750 [00:05<00:00, 386.27it/s]Loading weights: 100%|██████████| 750/750 [00:05<00:00, 136.33it/s]
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done (spec + HF baseline)
+[01] new=131 rounds=33 tau=3.97 proposed/round=4.18 spec_tpot=11.0ms base_tpot=35.3ms lossless=True
+[02] new=134 rounds=34 tau=3.94 proposed/round=4.03 spec_tpot=10.8ms base_tpot=35.2ms lossless=True
+[03] new=132 rounds=45 tau=2.93 proposed/round=3.07 spec_tpot=14.3ms base_tpot=35.8ms lossless=True
+[04] new=137 rounds=41 tau=3.34 proposed/round=3.39 spec_tpot=12.7ms base_tpot=35.8ms lossless=True
+[05] new=133 rounds=34 tau=3.91 proposed/round=3.71 spec_tpot=10.7ms base_tpot=35.7ms lossless=True
+[06] new=138 rounds=33 tau=4.18 proposed/round=4.09 spec_tpot=10.4ms base_tpot=39.9ms lossless=False
+     [diverge] at 26: spec=66963(':**') base=323(' and')
+     spec text: 'To find the difference between the highest and the lowest green bar, we need to:\n\n1.  **Identify the green bars:** The green bars represent the percentage of respondents who believe Japan should "Play a more active military role".\n\n2.  **Find the value of each green bar:**\n    -   In 2016, the green bar shows 29%.\n    -   In 2015, the green bar shows 23%.\n\n3.  **Determine the highest and lowest values:**\n    -   The highest value is 29% (from 2016).\n   '
+     base text: 'To find the difference between the highest and the lowest green bar, we need to:\n\n1.  **Identify the green bars and their values:**\n    -   The green bars represent the percentage of respondents who believe Japan should "Play a more active military role".\n    -   In 2016, the green bar value is **29%**.\n    -   In 2015, the green bar value is **23%**.\n\n2.  **Determine the highest and lowest values among these green bars:**\n    -   The highest value is **29%** (from 20'
+     logits gap(top1-top2)=0.000000 top5=323(' and'):39.6250, 66963(':**'):39.6250, 95518('**:'):39.3750, 13('.'):36.3125, 304(' in'):35.9062
+[07] new=132 rounds=42 tau=3.14 proposed/round=3.26 spec_tpot=13.1ms base_tpot=36.6ms lossless=True
+[08] new=136 rounds=29 tau=4.69 proposed/round=4.38 spec_tpot=9.0ms base_tpot=35.4ms lossless=True
+[09] new=132 rounds=43 tau=3.07 proposed/round=3.07 spec_tpot=14.0ms base_tpot=36.0ms lossless=True
+[10] new=130 rounds=38 tau=3.42 proposed/round=3.68 spec_tpot=12.8ms base_tpot=36.1ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=130
+tree: mode=eagle2_batch preconsume=True skip_replay=True cuda_graph=True draft_graph=True svd_rank=256 topk(width)=8 num_steps(depth)=8 max_tree_nodes=64
+total_new_tokens=1335 total_rounds=372
+accepted_tokens=1335 proposed_draft_tokens=1349
+tau(accept_length)=3.589 proposed/round=3.626
+tree_nodes/round=65.00 (verify 实际算了这么多节点)
+ms/round=42.57
+spec:   TPOT=11.86ms  throughput=84.30 tok/s  wall=15.84s
+baseline: TPOT=36.18ms  throughput=27.64 tok/s  wall=47.03s
+speedup=3.05x  lossless(all)=False
+=============================================================
+===== mode=vl config=svd_r512 =====
+[bench] loading target /root/autodl-tmp/models/Qwen3-VL-8B-Instruct ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:   0%|          | 1/750 [00:00<09:55,  1.26it/s]Loading weights:   7%|▋         | 50/750 [00:00<00:09, 75.36it/s]Loading weights:  10%|█         | 78/750 [00:01<00:07, 92.21it/s]Loading weights:  13%|█▎        | 100/750 [00:01<00:07, 85.06it/s]Loading weights:  15%|█▌        | 116/750 [00:01<00:08, 73.84it/s]Loading weights:  17%|█▋        | 128/750 [00:01<00:08, 70.98it/s]Loading weights:  18%|█▊        | 138/750 [00:02<00:08, 74.45it/s]Loading weights:  20%|█▉        | 148/750 [00:02<00:08, 67.65it/s]Loading weights:  21%|██        | 158/750 [00:02<00:09, 63.90it/s]Loading weights:  23%|██▎       | 169/750 [00:02<00:08, 69.92it/s]Loading weights:  24%|██▍       | 180/750 [00:02<00:08, 65.76it/s]Loading weights:  25%|██▌       | 191/750 [00:02<00:07, 73.00it/s]Loading weights:  27%|██▋       | 202/750 [00:03<00:08, 67.74it/s]Loading weights:  28%|██▊       | 213/750 [00:03<00:08, 63.18it/s]Loading weights:  30%|██▉       | 224/750 [00:03<00:07, 70.25it/s]Loading weights:  31%|███▏      | 235/750 [00:03<00:07, 66.07it/s]Loading weights:  33%|███▎      | 246/750 [00:03<00:07, 63.30it/s]Loading weights:  34%|███▍      | 257/750 [00:03<00:06, 71.22it/s]Loading weights:  36%|███▌      | 268/750 [00:04<00:07, 66.61it/s]Loading weights:  37%|███▋      | 279/750 [00:04<00:06, 74.75it/s]Loading weights:  39%|███▊      | 290/750 [00:04<00:06, 69.11it/s]Loading weights:  40%|████      | 301/750 [00:04<00:05, 75.28it/s]Loading weights:  42%|████▏     | 312/750 [00:04<00:06, 66.31it/s]Loading weights:  43%|████▎     | 323/750 [00:04<00:06, 63.43it/s]Loading weights:  45%|████▍     | 334/750 [00:05<00:06, 61.87it/s]Loading weights:  46%|████▌     | 345/750 [00:05<00:05, 69.35it/s]Loading weights:  47%|████▋     | 356/750 [00:05<00:06, 65.55it/s]Loading weights:  49%|████▉     | 367/750 [00:05<00:05, 73.46it/s]Loading weights:  50%|█████     | 378/750 [00:05<00:05, 68.23it/s]Loading weights:  52%|█████▏    | 389/750 [00:05<00:04, 74.48it/s]Loading weights:  57%|█████▋    | 427/750 [00:05<00:02, 122.07it/s]Loading weights:  63%|██████▎   | 476/750 [00:05<00:01, 200.89it/s]Loading weights:  70%|██████▉   | 523/750 [00:06<00:00, 263.63it/s]Loading weights:  75%|███████▍  | 559/750 [00:06<00:00, 287.29it/s]Loading weights:  80%|████████  | 602/750 [00:06<00:00, 324.75it/s]Loading weights:  86%|████████▋ | 647/750 [00:06<00:00, 357.60it/s]Loading weights:  92%|█████████▏| 691/750 [00:06<00:00, 379.97it/s]Loading weights:  97%|█████████▋| 731/750 [00:06<00:00, 300.62it/s]Loading weights: 100%|██████████| 750/750 [00:06<00:00, 111.72it/s]
+[bench] target ready: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+[bench] target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct eagle_layers=[2, 18, 33]
+[bench] warmup done (spec + HF baseline)
+[01] new=131 rounds=34 tau=3.85 proposed/round=4.06 spec_tpot=11.3ms base_tpot=33.8ms lossless=True
+[02] new=134 rounds=32 tau=4.19 proposed/round=4.16 spec_tpot=10.3ms base_tpot=35.1ms lossless=True
+[03] new=132 rounds=45 tau=2.93 proposed/round=3.04 spec_tpot=14.4ms base_tpot=35.5ms lossless=True
+[04] new=137 rounds=43 tau=3.19 proposed/round=3.28 spec_tpot=13.7ms base_tpot=36.4ms lossless=True
+[05] new=133 rounds=33 tau=4.03 proposed/round=3.73 spec_tpot=10.4ms base_tpot=38.1ms lossless=True
+[06] new=136 rounds=31 tau=4.39 proposed/round=4.39 spec_tpot=9.7ms base_tpot=36.2ms lossless=True
+[07] new=132 rounds=42 tau=3.14 proposed/round=3.21 spec_tpot=13.3ms base_tpot=35.3ms lossless=True
+[08] new=136 rounds=28 tau=4.86 proposed/round=4.61 spec_tpot=8.7ms base_tpot=36.4ms lossless=True
+[09] new=132 rounds=42 tau=3.14 proposed/round=3.10 spec_tpot=13.7ms base_tpot=35.2ms lossless=True
+[10] new=130 rounds=37 tau=3.51 proposed/round=3.62 spec_tpot=12.4ms base_tpot=34.9ms lossless=True
+
+==================== EAGLE3 accept + TPOT ====================
+mode=vl dtype=float16 explain=True
+target=/root/autodl-tmp/models/Qwen3-VL-8B-Instruct draft=taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3
+num_prompts=10 max_new_tokens=130
+tree: mode=eagle2_batch preconsume=True skip_replay=True cuda_graph=True draft_graph=True svd_rank=512 topk(width)=8 num_steps(depth)=8 max_tree_nodes=64
+total_new_tokens=1333 total_rounds=367
+accepted_tokens=1333 proposed_draft_tokens=1336
+tau(accept_length)=3.632 proposed/round=3.640
+tree_nodes/round=65.00 (verify 实际算了这么多节点)
+ms/round=42.75
+spec:   TPOT=11.77ms  throughput=84.96 tok/s  wall=15.69s
+baseline: TPOT=35.69ms  throughput=28.02 tok/s  wall=46.40s
+speedup=3.03x  lossless(all)=True
+=============================================================
+===== ALL DONE =====

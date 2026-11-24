@@ -1,4 +1,4 @@
-"""无训练 SVD 候选 Head：低秩召回 + 原始 LM Head 精确重打分。"""
+"""无训练 SVD 候选 Head 低秩召回 + 原始 LM Head 精确重打分。"""
 
 from __future__ import annotations
 
@@ -66,7 +66,9 @@ def _randomized_svd(
     q = min(rank + oversample, min(vocab, hidden))
     generator = torch.Generator(device=device)
     generator.manual_seed(seed)
-    omega = torch.randn(hidden, q, generator=generator, device=device, dtype=torch.float32)
+    omega = torch.randn(
+        hidden, q, generator=generator, device=device, dtype=torch.float32
+    )
 
     previous_tf32 = None
     if device.type == "cuda":
@@ -91,7 +93,9 @@ def _randomized_svd(
         reconstructed = a[rows].float() @ b.float()
         reference = w[rows]
         error = float(
-            ((reconstructed - reference).norm() / reference.norm().clamp_min(1e-12)).item()
+            (
+                (reconstructed - reference).norm() / reference.norm().clamp_min(1e-12)
+            ).item()
         )
         return a.detach(), b.detach(), energy, error
     finally:
@@ -112,7 +116,9 @@ def build_svd_head(
 ) -> "SVDCandidateHead":
     """从原始权重生成或加载纯 SVD 因子；缓存键包含完整权重 SHA256。"""
     if not 0 < num_candidates <= weight.shape[0]:
-        raise ValueError(f"num_candidates={num_candidates} 必须位于 [1,{weight.shape[0]}]")
+        raise ValueError(
+            f"num_candidates={num_candidates} 必须位于 [1,{weight.shape[0]}]"
+        )
     digest = weight_sha256(weight)
     cache_path = None
     if cache_dir:
@@ -132,7 +138,9 @@ def build_svd_head(
             }
             actual = {key: payload.get(key) for key in expected}
             if actual != expected:
-                raise RuntimeError(f"SVD 缓存元数据不匹配: {cache_path}, {actual} != {expected}")
+                raise RuntimeError(
+                    f"SVD 缓存元数据不匹配: {cache_path}, {actual} != {expected}"
+                )
             stats = SVDInitStats(
                 rank=rank,
                 oversample=oversample,
@@ -232,7 +240,10 @@ class SVDCandidateHead:
 
     @property
     def extra_bytes(self) -> int:
-        return self.a.numel() * self.a.element_size() + self.b.numel() * self.b.element_size()
+        return (
+            self.a.numel() * self.a.element_size()
+            + self.b.numel() * self.b.element_size()
+        )
 
     def _check_hidden(self, hidden: torch.Tensor) -> None:
         if hidden.dim() != 2 or hidden.shape[1] != self.weight.shape[1]:
@@ -260,9 +271,7 @@ class SVDCandidateHead:
             approximate, self.num_candidates, dim=-1, sorted=False
         ).indices
         candidate_weight = self.weight[candidate_ids]
-        exact_logits = torch.bmm(
-            candidate_weight, hidden.unsqueeze(-1)
-        ).squeeze(-1)
+        exact_logits = torch.bmm(candidate_weight, hidden.unsqueeze(-1)).squeeze(-1)
         return candidate_ids, exact_logits
 
     @torch.inference_mode()
@@ -275,12 +284,16 @@ class SVDCandidateHead:
         return output.scatter(1, candidate_ids, exact_logits)
 
     @torch.inference_mode()
-    def full_topk(self, hidden: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def full_topk(
+        self, hidden: torch.Tensor, k: int
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         scores, ids = torch.topk(self.full_logits(hidden), k, dim=-1)
         return ids, scores
 
     @torch.inference_mode()
-    def svd_topk(self, hidden: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def svd_topk(
+        self, hidden: torch.Tensor, k: int
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         if not 0 < k <= self.num_candidates:
             raise ValueError(f"k={k} 必须位于 [1,{self.num_candidates}]")
         candidate_ids, candidate_logits = self.candidates(hidden)
@@ -296,21 +309,23 @@ def evaluate_recall(
     full_ids, _ = head.full_topk(hidden, topk)
     candidate_ids, candidate_logits = head.candidates(hidden)
     svd_ids, _ = head.svd_topk(hidden, topk)
-    full_in_candidates = (
-        full_ids.unsqueeze(2) == candidate_ids.unsqueeze(1)
-    ).any(dim=-1)
-    final_overlap = (
-        full_ids.unsqueeze(2) == svd_ids.unsqueeze(1)
-    ).any(dim=-1)
+    full_in_candidates = (full_ids.unsqueeze(2) == candidate_ids.unsqueeze(1)).any(
+        dim=-1
+    )
+    final_overlap = (full_ids.unsqueeze(2) == svd_ids.unsqueeze(1)).any(dim=-1)
     expected = torch.einsum(
         "bkh,bh->bk", head.weight[candidate_ids].float(), hidden.float()
     ).to(hidden.dtype)
-    max_rescore_error = float((candidate_logits.float() - expected.float()).abs().max().item())
+    max_rescore_error = float(
+        (candidate_logits.float() - expected.float()).abs().max().item()
+    )
     return {
         "rows": int(hidden.shape[0]),
         "candidate_top1_recall": float(full_in_candidates[:, 0].float().mean().item()),
         "candidate_topk_recall": float(full_in_candidates.float().mean().item()),
-        "selected_top1_match": float((full_ids[:, 0] == svd_ids[:, 0]).float().mean().item()),
+        "selected_top1_match": float(
+            (full_ids[:, 0] == svd_ids[:, 0]).float().mean().item()
+        ),
         "selected_topk_overlap": float(final_overlap.float().mean().item()),
         "max_rescore_abs_error": max_rescore_error,
     }
@@ -327,7 +342,9 @@ def candidate_topk_log_probs(draft_model, candidates: CandidateLogits, topk: int
 class DraftHeadSwitcher:
     """实验期切换现有 draft 的 Head；full 调用原 bound method，退出可恢复。"""
 
-    def __init__(self, draft_model, head: SVDCandidateHead, *, native_candidates: bool = False) -> None:
+    def __init__(
+        self, draft_model, head: SVDCandidateHead, *, native_candidates: bool = False
+    ) -> None:
         if getattr(draft_model, "lm_head", None) is None:
             raise ValueError("本实验要求 draft 使用独立 lm_head")
         if draft_model.lm_head.weight is not head.weight:
@@ -346,7 +363,9 @@ class DraftHeadSwitcher:
 
     def _convert(self, logits, k: int):
         if isinstance(logits, CandidateLogits):
-            scores, positions = torch.topk(logits.logits, min(k, logits.logits.shape[-1]), dim=-1)
+            scores, positions = torch.topk(
+                logits.logits, min(k, logits.logits.shape[-1]), dim=-1
+            )
             ids = logits.token_ids.gather(1, positions)
             hot_token_id = getattr(self.draft_model, "hot_token_id", None)
             if hot_token_id is not None:
