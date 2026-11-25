@@ -60,8 +60,8 @@ class TestEagle3Sgl(unittest.TestCase):
         # (1) 多层 aux:fc 输入 = n*H(降维多层 act,与 embedding 分开)
         self.assertEqual(draft.fc.in_features, len(layers) * H)
         self.assertEqual(draft.fc.out_features, H)
-        # (3) midlayer:qkv 输入 = 2H,且有独立的 hidden_norm
-        self.assertEqual(draft.midlayer.q_proj.in_features, 2 * H)
+        # (3) midlayer:qkv 输入 = 2H(合并单 GEMM),且有独立的 hidden_norm
+        self.assertEqual(draft.midlayer.qkv_proj.in_features, 2 * H)
         self.assertTrue(hasattr(draft.midlayer, "hidden_norm"))
         logits = torch.zeros(1, int(self.target.config.vocab_size))
         idx, sc = draft.convert_to_target_topk_token_ids(logits, 3)

@@ -94,6 +94,8 @@ class _Eagle3MidLayer(nn.Module):
         self.n_kv_heads = n_kv_heads if n_kv_heads is not None else n_heads
         self.head_dim = hidden // n_heads
         kv_dim = self.n_kv_heads * self.head_dim
+        self.q_dim = hidden
+        self.kv_dim = kv_dim
         inv = 1.0 / (
             rope_base
             ** (torch.arange(0, self.head_dim, 2, dtype=torch.float32) / self.head_dim)
@@ -105,13 +107,23 @@ class _Eagle3MidLayer(nn.Module):
         self.post_attention_layernorm = _RMSNorm(hidden, eps=eps, **fk)
         # qkv 输入维度 = 2H(embed 与 hidden 拼接);q/o 输出 H,k/v 输出 kv_dim(GQA)
         # * 偷偷降维度了
-        self.q_proj = nn.Linear(2 * hidden, hidden, bias=False, **fk)
-        self.k_proj = nn.Linear(2 * hidden, kv_dim, bias=False, **fk)
-        self.v_proj = nn.Linear(2 * hidden, kv_dim, bias=False, **fk)
+        # q/k/v 合并为一次 GEMM, 输出按 [q, k, v] 切分; gate/up 同理合并。
+        self.qkv_proj = nn.Linear(2 * hidden, hidden + 2 * kv_dim, bias=False, **fk)
         self.o_proj = nn.Linear(hidden, hidden, bias=False, **fk)
-        self.gate_proj = nn.Linear(hidden, intermediate, bias=False, **fk)
-        self.up_proj = nn.Linear(hidden, intermediate, bias=False, **fk)
+        self.gate_up_proj = nn.Linear(hidden, 2 * intermediate, bias=False, **fk)
         self.down_proj = nn.Linear(intermediate, hidden, bias=False, **fk)
+
+    def _qkv(self, x: torch.Tensor, b: int, seq_len: int):
+        """合并 qkv GEMM 后按 [q, k, v] 切分, 转成 (b, heads, seq, head_dim)。"""
+        q, k, v = self.qkv_proj(x).split((self.q_dim, self.kv_dim, self.kv_dim), dim=-1)
+        q = q.view(b, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
+        k = k.view(b, seq_len, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        v = v.view(b, seq_len, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        return q, k, v
+
+    def _mlp(self, h: torch.Tensor) -> torch.Tensor:
+        gate, up = self.gate_up_proj(h).chunk(2, dim=-1)
+        return self.down_proj(F.silu(gate) * up)
 
     def _mrope_recomposition(self, freq: torch.Tensor) -> torch.Tensor:
         """按 mrope_section 交错重组三轴频率, 对齐 Qwen3-VL 的 MRoPE.
@@ -154,9 +166,7 @@ class _Eagle3MidLayer(nn.Module):
         e = self.input_layernorm(embeds)
         hn = self.hidden_norm(hidden)
         x = torch.cat([e, hn], dim=-1)
-        q = self.q_proj(x).view(b, S, self.n_heads, self.head_dim).transpose(1, 2)
-        k = self.k_proj(x).view(b, S, self.n_kv_heads, self.head_dim).transpose(1, 2)
-        v = self.v_proj(x).view(b, S, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        q, k, v = self._qkv(x, b, S)
         cos, sin = self._rope_cos_sin(positions, x.device, x.dtype)
         q = _apply_rope(q, cos, sin)
         k = _apply_rope(k, cos, sin)
@@ -164,16 +174,13 @@ class _Eagle3MidLayer(nn.Module):
         # import pdb
 
         # pdb.set_trace()
-        # GQA:把 kv repeat 到 q head 维再做SDPA
-        rep = self.n_heads // self.n_kv_heads
-        kk = k.repeat_interleave(rep, dim=1) if rep > 1 else k
-        vv = v.repeat_interleave(rep, dim=1) if rep > 1 else v
-        o = F.scaled_dot_product_attention(q, kk, vv, is_causal=True)
+        # SDPA 原生 GQA: 不再把 KV 物理 repeat 到 q head 数
+        o = F.scaled_dot_product_attention(q, k, v, is_causal=True, enable_gqa=True)
         o = o.transpose(1, 2).contiguous().view(b, S, self.n_heads * self.head_dim)
         hidden = residual + self.o_proj(o)
         residual = hidden
         h = self.post_attention_layernorm(hidden)
-        mlp = self.down_proj(F.silu(self.gate_proj(h)) * self.up_proj(h))
+        mlp = self._mlp(h)
         return residual + mlp, new_kv
 
     def extend(
@@ -191,9 +198,7 @@ class _Eagle3MidLayer(nn.Module):
         e = self.input_layernorm(embeds)
         hn = self.hidden_norm(hidden)
         x = torch.cat([e, hn], dim=-1)
-        q = self.q_proj(x).view(b, A, self.n_heads, self.head_dim).transpose(1, 2)
-        k = self.k_proj(x).view(b, A, self.n_kv_heads, self.head_dim).transpose(1, 2)
-        v = self.v_proj(x).view(b, A, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        q, k, v = self._qkv(x, b, A)
         positions = torch.arange(
             start_position, start_position + A, device=x.device, dtype=torch.long
         ) + int(rope_delta)
@@ -206,25 +211,22 @@ class _Eagle3MidLayer(nn.Module):
             k = torch.cat([pk, k], dim=2)
             v = torch.cat([pv, v], dim=2)
         new_kv = (k, v)
-        rep = self.n_heads // self.n_kv_heads
-        kk = k.repeat_interleave(rep, dim=1) if rep > 1 else k
-        vv = v.repeat_interleave(rep, dim=1) if rep > 1 else v
-        past_len = int(kk.shape[2]) - A
+        past_len = int(k.shape[2]) - A
         # 显式 mask:第 i 个新 token 的 Q 只能 attend 前 past_len+i+1 个 K
         # * 这里是并行的进行kv 的更新, 但是实际上, draft的时候是串行生成的, 需要加mask 和串行生成一样才行
         # * 核心原因是: 虽然一次并行处理 A 个接受的 token, 但结果必须和一个个串行输入完全一样 .
         idx_q = torch.arange(A, device=x.device).view(A, 1)
-        idx_k = torch.arange(kk.shape[2], device=x.device).view(1, -1)
+        idx_k = torch.arange(k.shape[2], device=x.device).view(1, -1)
         allowed = idx_k <= (past_len + idx_q)
-        attn_mask = torch.zeros((A, kk.shape[2]), device=x.device, dtype=q.dtype)
+        attn_mask = torch.zeros((A, k.shape[2]), device=x.device, dtype=q.dtype)
         attn_mask = attn_mask.masked_fill(~allowed, float("-inf"))
         attn_mask = attn_mask.unsqueeze(0).unsqueeze(0)
-        o = F.scaled_dot_product_attention(q, kk, vv, attn_mask=attn_mask)
+        o = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, enable_gqa=True)
         o = o.transpose(1, 2).contiguous().view(b, A, self.n_heads * self.head_dim)
         hidden = residual + self.o_proj(o)
         residual = hidden
         h = self.post_attention_layernorm(hidden)
-        mlp = self.down_proj(F.silu(self.gate_proj(h)) * self.up_proj(h))
+        mlp = self._mlp(h)
         return residual + mlp, new_kv
 
     def step(
@@ -240,9 +242,7 @@ class _Eagle3MidLayer(nn.Module):
         e = self.input_layernorm(embeds)
         hn = self.hidden_norm(hidden)
         x = torch.cat([e, hn], dim=-1)
-        q = self.q_proj(x).view(b, 1, self.n_heads, self.head_dim).transpose(1, 2)
-        k = self.k_proj(x).view(b, 1, self.n_kv_heads, self.head_dim).transpose(1, 2)
-        v = self.v_proj(x).view(b, 1, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        q, k, v = self._qkv(x, b, 1)
         cos, sin = self._rope_cos_sin(
             torch.tensor([position], device=x.device), x.device, x.dtype
         )
@@ -254,15 +254,12 @@ class _Eagle3MidLayer(nn.Module):
             k = torch.cat([pk, k], dim=2)
             v = torch.cat([pv, v], dim=2)
         new_kv = (k, v)
-        rep = self.n_heads // self.n_kv_heads
-        kk = k.repeat_interleave(rep, dim=1) if rep > 1 else k
-        vv = v.repeat_interleave(rep, dim=1) if rep > 1 else v
-        o = F.scaled_dot_product_attention(q, kk, vv)
+        o = F.scaled_dot_product_attention(q, k, v, enable_gqa=True)
         o = o.transpose(1, 2).contiguous().view(b, 1, self.n_heads * self.head_dim)
         hidden = residual + self.o_proj(o)
         residual = hidden
         h = self.post_attention_layernorm(hidden)
-        mlp = self.down_proj(F.silu(self.gate_proj(h)) * self.up_proj(h))
+        mlp = self._mlp(h)
         return residual + mlp, new_kv
 
     def step_static(
@@ -281,9 +278,7 @@ class _Eagle3MidLayer(nn.Module):
         e = self.input_layernorm(embeds)
         hn = self.hidden_norm(hidden)
         x = torch.cat([e, hn], dim=-1)
-        q = self.q_proj(x).view(b, 1, self.n_heads, self.head_dim).transpose(1, 2)
-        k = self.k_proj(x).view(b, 1, self.n_kv_heads, self.head_dim).transpose(1, 2)
-        v = self.v_proj(x).view(b, 1, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        q, k, v = self._qkv(x, b, 1)
         cos, sin = self._rope_cos_sin(rope_position, x.device, x.dtype)
         q = _apply_rope(q, cos, sin)
         k = _apply_rope(k, cos, sin)
@@ -291,15 +286,14 @@ class _Eagle3MidLayer(nn.Module):
         # cache_position 是 GPU tensor，图重放时读取新值，不需要重新 capture。
         key_cache.index_copy_(2, cache_position, k)
         value_cache.index_copy_(2, cache_position, v)
-        rep = self.n_heads // self.n_kv_heads
-        kk = key_cache.repeat_interleave(rep, dim=1) if rep > 1 else key_cache
-        vv = value_cache.repeat_interleave(rep, dim=1) if rep > 1 else value_cache
-        o = F.scaled_dot_product_attention(q, kk, vv, attn_mask=key_mask)
+        o = F.scaled_dot_product_attention(
+            q, key_cache, value_cache, attn_mask=key_mask, enable_gqa=True
+        )
         o = o.transpose(1, 2).contiguous().view(b, 1, self.n_heads * self.head_dim)
         hidden = residual + self.o_proj(o)
         residual = hidden
         h = self.post_attention_layernorm(hidden)
-        mlp = self.down_proj(F.silu(self.gate_proj(h)) * self.up_proj(h))
+        mlp = self._mlp(h)
         return residual + mlp
 
 
@@ -714,6 +708,22 @@ def load_eagle3_draft_weights(
     if d2t is not None and getattr(draft_model, "hot_token_id", None) is not None:
         hot = d2t.to(torch.long) + torch.arange(d2t.shape[0], dtype=torch.long)
         local["hot_token_id"] = hot.to(draft_model.hot_token_id.device)
+
+    # q/k/v 与 gate/up 分别 cat 成合并 GEMM 的权重(模块内只有 qkv_proj/gate_up_proj)
+    fused: dict = {}
+    for fused_name, part_names in (
+        (
+            "midlayer.qkv_proj.weight",
+            ("midlayer.q_proj.weight", "midlayer.k_proj.weight", "midlayer.v_proj.weight"),
+        ),
+        (
+            "midlayer.gate_up_proj.weight",
+            ("midlayer.gate_proj.weight", "midlayer.up_proj.weight"),
+        ),
+    ):
+        if all(part in local for part in part_names):
+            fused[fused_name] = torch.cat([local.pop(part) for part in part_names], dim=0)
+    local.update(fused)
 
     res = draft_model.load_state_dict(local, strict=strict)
     unexpected = set(res.unexpected_keys)
